@@ -73,21 +73,13 @@ qemu-system-x86_64 boot_sect.bin
 xxd boot_sect.bin
 ```
 
-### 实模式
-
-计算机是充满妥协的，当你设计出一个新东西的时候，总是要考虑向下兼容。
-
-对于刚开始启动的计算机来讲，当然不知道操作系统是多少位的。为了兼容，它只能先进入一个 16 位的模式——`实模式`。实模式是 Intel 8086 处理器的一种工作模式，在实模式下，CPU 只能访问 1MB 的内存，而且只能使用 16 位的寄存器。
-
-简单一通操作之后，高级一点的操作系统便可以选择进入 `保护模式`，这样才能能够访问到更大的内存，使用更多的寄存器，以及更多的功能。
-
 ### `Hello, World!`
 
 死循环没什么意思，我们来尝试输出一句 `Hello, World!`。同样的，先写程序，然后将最后两位设置为 `0xaa55`，再把其它的字节填充为 `0`。
 
 问题来了，如何在汇编中打印字符？首先，我们要设置要打印哪个字符。我们只需要将字符存储在 `ax` 寄存器的低 8 位（也就是 `al` 寄存器），然后调用 `int 0x10` 中断执行打印即可。
 
-> 对于 x86 CPU 来讲，一共有 4 个 16 位通用寄存器，包括 `ax`、`bx`、`cx` 和 `dx`。有时候我们只需要使用 8 位，因此每个 16 位寄存器可以拆为两个 8 位寄存器，例如 `al` 和 `ah`。
+> 对于此时的 x86 CPU 来讲，一共有 4 个 16 位通用寄存器，包括 `ax`、`bx`、`cx` 和 `dx`。有时候我们只需要使用 8 位，因此每个 16 位寄存器可以拆为两个 8 位寄存器，例如 `al` 和 `ah`。
 
 > 什么是中断？简单来讲就是给 CPU 正在做的事情按下暂停，然后去执行我们指定的任务。中断可以执行的任务被存储在内存最开始的区域，这个区域像一张表格（中断向量表），每个单元格指向一段指令的地址，也就是 ISR（interrupt service routines）。
 >
@@ -98,45 +90,45 @@ xxd boot_sect.bin
 于是我们修改刚刚的代码：
 
 ```asm
-; 设置 TTY 模式
-mov ah, 0x0e
+  ; 设置 TTY 模式
+  mov ah, 0x0e
 
-; 设置要打印的字符
-mov al, 'H'
-int 0x10
-mov al, 'e'
-int 0x10
-mov al, 'l'
-int 0x10
-mov al, 'l'
-int 0x10
-mov al, 'o'
-int 0x10
-mov al, ','
-int 0x10
-mov al, ' '
-int 0x10
-mov al, 'W'
-int 0x10
-mov al, 'o'
-int 0x10
-mov al, 'r'
-int 0x10
-mov al, 'l'
-int 0x10
-mov al, 'd'
-int 0x10
-mov al, '!'
-int 0x10
+  ; 设置要打印的字符
+  mov al, 'H'
+  int 0x10
+  mov al, 'e'
+  int 0x10
+  mov al, 'l'
+  int 0x10
+  mov al, 'l'
+  int 0x10
+  mov al, 'o'
+  int 0x10
+  mov al, ','
+  int 0x10
+  mov al, ' '
+  int 0x10
+  mov al, 'W'
+  int 0x10
+  mov al, 'o'
+  int 0x10
+  mov al, 'r'
+  int 0x10
+  mov al, 'l'
+  int 0x10
+  mov al, 'd'
+  int 0x10
+  mov al, '!'
+  int 0x10
 
-; 打印完成后死循环
-jmp $
+  ; 打印完成后死循环
+  jmp $
 
-; 填充 0
-times 510-($-$$) db 0
+  ; 填充 0
+  times 510-($-$$) db 0
 
-; 最后两个字节是 0xaa55
-dw 0xaa55
+  ; 最后两个字节是 0xaa55
+  dw 0xaa55
 ```
 
 现在，再次编译运行，便可以看到 `Hello, World!` 了。
@@ -181,20 +173,20 @@ dw 0xaa55
 在汇编中，我们定义的数据都存储的相对地址。为了访问它们，我们需要将这些相对地址转换为绝对地址——也就是加上 `0x7c00`。例如：
 
 ```asm
-mov ah, 0x0e
+  mov ah, 0x0e
 
-mov bx, my_data ; 将 my_data 的相对地址存储到 bx 中
-add bx, 0x7c00  ; 将 bx 加上 0x7c00，得到 my_data 的绝对地址
-mov al, [bx]    ; 从 my_data 的绝对地址读取数据放入 al 中
-int 0x10        ; 打印 al 中的数据
+  mov bx, my_data ; 将 my_data 的相对地址存储到 bx 中
+  add bx, 0x7c00  ; 将 bx 加上 0x7c00，得到 my_data 的绝对地址
+  mov al, [bx]    ; 从 my_data 的绝对地址读取数据放入 al 中
+  int 0x10        ; 打印 al 中的数据
 
-jmp $
+  jmp $
 
 my_data:
   db 'X'        ; db 表示 declare bytes
 
-times 510-($-$$) db 0
-dw 0xaa55
+  times 510-($-$$) db 0
+  dw 0xaa55
 ```
 
 但是，每次都要加上 `0x7c00` 太麻烦了，我们可以使用 `org` 指令来设置全局偏移量（当前段的基地址）：
@@ -202,18 +194,70 @@ dw 0xaa55
 ```asm
 [org 0x7c00]
 
-mov ah, 0x0e
+  mov ah, 0x0e
 
-mov al, [my_data] ; 自动转换为了 [0x7c00 + my_data]
-int 0x10          ; 打印 al 中的数据
+  mov al, [my_data] ; 自动转换为了 [0x7c00 + my_data]
+  int 0x10          ; 打印 al 中的数据
 
-jmp $
+  jmp $
 
 my_data:
   db 'X'
 
-times 510-($-$$) db 0
-dw 0xaa55
+  times 510-($-$$) db 0
+  dw 0xaa55
+```
+
+### 分段
+
+我们使用 `[org 0x7c00]` 来设置当前段的基地址，从底层来看，这相当于设置了`段寄存器`的值。
+
+段基址可以存储在 4 个 16 位寄存器中，分别是 `cs`、`ds`、`ss` 和 `es`。存储的基址在计算时会左移 4 位，然后加上段内偏移量。例如，我将 `ds` 设置为 `0x7c0`，那么访问 `0x10` 时，实际上访问的是 `0x7c0 << 4 + 0x10 = 0x7c10`。
+
+因此，`[org 0x7c00]` 和把 `0x7c0` 传入 `ds` 是等价的：
+
+```asm
+  mov ah, 0x0e
+
+  mov bx, 0x7c0     ; 将 my_data 的相对地址存储到 bx 中
+  mov ds, bx        ; 将 bx 的值传入 ds
+  mov al, [my_data] ; 自动转换为了 [0x7c00 + my_data]
+  int 0x10          ; 打印 al 中的数据
+
+  jmp $
+
+my_data:
+  db 'X'
+
+  times 510-($-$$) db 0
+  dw 0xaa55
+```
+
+> 注意，我们无法将立即数直接传入段寄存器。我们需要先将立即数存储到一个通用寄存器中，再从通用寄存器传入段寄存器。
+>
+> 你可以试着这么做，但会报错：
+>
+> ```plaintext
+> error: invalid combination of opcode and operands
+> ```
+
+当然，也可以使用别的段寄存器，例如 `es`：
+
+```asm
+  mov ah, 0x0e
+
+  mov bx, 0x7c0        ; 将 my_data 的相对地址存储到 bx 中
+  mov es, bx           ; 将 bx 的值传入 es
+  mov al, [es:my_data] ; 自动转换为了 [0x7c00 + my_data]
+  int 0x10             ; 打印 al 中的数据
+
+  jmp $
+
+my_data:
+  db 'X'
+
+  times 510-($-$$) db 0
+  dw 0xaa55
 ```
 
 ### Yet Another `Hello, World!`
@@ -284,6 +328,8 @@ print:
   mov bx, HELLO_MSG ; 放入参数地址
   call print        ; 调用打印函数
 
+  call print_nl     ; 调用打印换行函数
+
   mov dx, 0x1f6b    ; 放入参数
   call print_hex    ; 调用打印 16 进制函数
 
@@ -342,6 +388,142 @@ HEX_OUT:
   db '0x0000', 0
 ```
 
+同时，在 `sect_boot_print.asm` 中添加打印换行函数：
+
+```asm
+print_nl:
+  pusha        ; 保存寄存器状态
+  
+  mov ah, 0x0e ; 设置 TTY 模式
+
+  mov al, 0x0a ; 换行符
+  int 0x10     ; 打印换行符
+  mov al, 0x0d ; 回车符
+  int 0x10     ; 打印回车符
+  
+  popa         ; 恢复寄存器状态
+  ret          ; 返回
+```
+
 编译运行，你会看到 `Hello, World!` 和 `0x1F6B` 被打印在屏幕上。
 
 万事俱备，只欠东风。接下来，我们就真的要开始读取磁盘了。
+
+### 读取磁盘
+
+首先要考虑的是，我们如何定位磁盘上的某一个区域。
+
+通常，磁盘会按照 CHS 来定位。Head 是磁头，Cylinder 是磁道，Sector 是扇区。我们可以使用这三个参数来定位磁盘上的某一个区域，如图所示。
+
+![CHS 示意图](./imgs/chs.jpeg)
+
+> 还有一种方式是 LBA（Logical Block Addressing），它使用一个 32 位的地址来定位磁盘上的某一个区域。它和 CHS 的区别如图所示。
+>
+> ![CHS vs LBA](./imgs/chs_vs_lba.gif)
+
+读盘是使用 [`0x13` 中断](https://stanislavs.org/helppc/int_13-2.html)来实现的，它的参数如下：
+
+- `ah`：功能号，`0x02` 表示读取扇区；
+- `al`：要读取的扇区数，范围从 `0x01` 到 `0x80`；
+- `es:bx`: 放置数据的地址；
+- `ch`：开始读取的磁道号，范围从 `0x0` 到 `0x3ff`；
+- `cl`：开始读取的扇区号，范围从 `0x01` 到 `0x11`（`0x00` 是引导扇区）；
+- `dh`：开始读取的磁头号，范围从 `0x0` 到 `0xf`；
+- `dl`：驱动器号，`0`=A:、`1`=2nd floppy、`0x80`=drive 0、`0x81`=drive 1。
+
+返回值为：
+
+- `ah` 为[状态码](https://stanislavs.org/helppc/int_13-1.html)；
+- `al` 为读取的扇区数；
+- `cf` 为指示是否出错的标志，`0` 表示成功，`1` 表示失败。
+
+据此，我们可以很容易地实现读取磁盘：
+
+`boot_sect.asm`:
+
+```asm
+[org 0x7c00]
+  mov [BOOT_DRIVE], dl   ; 保存启动驱动器号
+
+  mov bp, 0x8000         ; 将栈指针移动到安全位置
+  mov sp, bp
+
+  mov bx, 0x9000         ; 存储数据的位置在 [es:bx] 中，其中 es = 0x0000
+  mov dh, 0x04           ; 读取 4 个扇区 (0x01 .. 0x80)
+  mov dl, [BOOT_DRIVE]   ; 0 = floppy, 1 = floppy2, 0x80 = hdd, 0x81 = hdd2
+  call disk_load
+
+  mov dx, [0x9000]       ; 扇区 2 磁道 0 磁头 0 的第一个字
+  call print_hex
+
+  call print_nl
+
+  mov dx, [0x9000 + 1536] ; 扇区 5 磁道 0 磁头 0 的第一个字
+  call print_hex
+
+  jmp $
+
+%include "boot_sect_print.asm"
+%include "boot_sect_print_hex.asm"
+%include "boot_sect_disk.asm"
+
+  BOOT_DRIVE: db 0
+
+  times 510 - ($-$$) db 0
+  dw 0xaa55
+
+  times 256 dw 0xdead ; 扇区 2 磁道 0 磁头 0
+  times 256 dw 0xbeaf ; 扇区 3 磁道 0 磁头 0
+  times 256 dw 0xface ; 扇区 4 磁道 0 磁头 0
+  times 256 dw 0xbabe ; 扇区 5 磁道 0 磁头 0
+```
+
+`boot_sect_disk.asm`:
+
+```asm
+; bx 存储数据要保存的位置
+; dh 存储要读取的扇区数
+; dl 存储要读取的驱动器号
+disk_load:
+  push dx         ; 保存要读取的扇区数
+
+  mov ah, 0x02    ; 表明是读取
+
+  mov al, dh      ; 要读取的扇区数
+  mov dh, 0x00    ; 从第 0 个磁头 (0x0 .. 0xF) 开始
+  mov ch, 0x00    ; 从第 0 个磁道 (0x0 .. 0x3FF, 其中最高两位在 cl 中) 开始
+  mov cl, 0x02    ; 从第 2 个扇区 (0x01 .. 0x11) 开始
+  
+  int 0x13        ; BIOS 磁盘服务中断
+  jc .disk_error  ; 如果读取失败，跳转
+
+  pop dx          ; 要读取的扇区数
+  cmp dh, al      ; 检查读取的扇区数是否正确
+  jne .disk_error ; 如果不正确，跳转
+
+  ret
+
+.disk_error:
+  mov bx, DISK_ERROR_MSG
+  call print
+  jmp $
+
+DISK_ERROR_MSG: db "[ERR] Disk read error", 0
+```
+
+编译运行后，你会看到 `0xdead` 和 `0xbabe` 被打印在屏幕上。
+
+## 32 位保护模式
+
+### 16 位实模式
+
+计算机是充满妥协的，当你设计出一个新东西的时候，总是要考虑向下兼容。
+
+对于刚开始启动的计算机来讲，当然不知道操作系统是多少位的。为了兼容，它只能先进入一个 16 位的模式——`16 位实模式`。实模式是 Intel 8086 处理器的一种工作模式，在实模式下，CPU 只能访问 1MB 的内存，而且只能使用 16 位的寄存器。
+
+我们刚刚就一直在实模式下工作。但是，实模式有着很多缺点。因此，我们在实模式下读取到一些硬盘数据后，便可以顺势进入 `32 位保护模式`，享受到更大的内存、更多更大的寄存器、更丰富的功能。具体来讲有以下几点：
+
+- 寄存器全部变为 32 位，我们向之前的寄存器名称前添加 `e` 来表明这一点，例如 `eax`、`ebx`；
+- 增加了 2 个新的段寄存器 `fs` 和 `gs`；
+- 内存偏移增加至 32 位，因此我们可以访问到 4 GB 的内存；
+- 支持了虚拟内存、内存保护等功能。
