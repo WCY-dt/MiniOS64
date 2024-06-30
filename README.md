@@ -2,10 +2,11 @@
 
 我推荐你用 Linux。因为不管你用什么，反正我是用 Linux。
 
-先安装好 nasm 和 qemu：
+先安装好必要的工具：
 
 ```bash
-sudo apt-get install nasm qemu
+sudo apt-get update
+sudo apt-get install nasm qemu gcc gcc-multilib
 ```
 
 你要是心情好的话，也可以再安装一下 xxd：
@@ -38,6 +39,8 @@ sudo apt-get install xxd
 
 我们暂时先写一个死循环：
 
+`boot/boot_sect.asm`：
+
 ```asm
 ; $ 表示当前地址
 ; 跳转到当前地址就是死循环
@@ -51,16 +54,16 @@ times 510-($-$$) db 0
 dw 0xaa55
 ```
 
-将文件命名为 `boot_sect.asm`，然后编译为二进制文件：
+然后编译为二进制文件：
 
 ```bash
-nasm boot_sect.asm -f bin -o boot_sect.bin
+nasm ./boot/boot_sect.asm -f bin -o ./boot/boot_sect.bin
 ```
 
 再使用 QEMU 运行：
 
 ```bash
-qemu-system-x86_64 boot_sect.bin
+qemu-system-x86_64 ./boot/boot_sect.bin
 ```
 
 你会看到窗口中显示 `Booting from Hard Disk...`，然后它就开始执行我们的死循环了。
@@ -70,7 +73,7 @@ qemu-system-x86_64 boot_sect.bin
 你也可以用下面的命令看看我们的 bin 文件内容是否如我们所想：
 
 ```bash
-xxd boot_sect.bin
+xxd ./boot/boot_sect.bin
 ```
 
 ### `Hello, World!`
@@ -133,7 +136,7 @@ xxd boot_sect.bin
 
 现在，再次编译运行，便可以看到 `Hello, World!` 了。
 
-我推荐你用 `xxd boot_sect.bin` 来查看编译后的二进制文件，看看这些汇编指令在二进制中到底是啥样的。
+我推荐你用 `xxd ./boot/boot_sect.bin` 来查看编译后的二进制文件，看看这些汇编指令在二进制中到底是啥样的。
 
 ### 内存地址
 
@@ -266,7 +269,7 @@ my_data:
 
 我们可以将 `Hello, World!` 存储在内存中，然后通过循环打印出来：
 
-`boot_sect.asm`:
+`boot/boot_sect.asm`:
 
 ```asm
 [org 0x7c00]
@@ -276,7 +279,7 @@ my_data:
 
   jmp $
 
-%include "boot_sect_print.asm"
+%include "print.asm"
 
 HELLO_MSG:
   db 'Hello, World!', 0
@@ -285,7 +288,7 @@ HELLO_MSG:
   dw 0xaa55
 ```
 
-`boot_sect_print.asm`:
+`boot/print.asm`:
 
 ```asm
 ; 参数在 bx 中
@@ -320,7 +323,7 @@ print:
 
 上一节中，我们已经实现了一个打印字符串的函数。现在，我们再来实现一个打印 16 进制的函数。
 
-`boot_sect.asm`:
+`boot/boot_sect.asm`:
 
 ```asm
 [org 0x7c00]
@@ -335,8 +338,8 @@ print:
 
   jmp $
 
-%include "boot_sect_print.asm"
-%include "boot_sect_print_hex.asm"
+%include "print.asm"
+%include "print_hex.asm"
 
 HELLO_MSG:
   db 'Hello, World!', 0
@@ -345,10 +348,10 @@ HELLO_MSG:
   dw 0xaa55
 ```
 
-`boot_sect_print_hex.asm`:
+`boot/print_hex.asm`:
 
 ```asm
-; 依赖于 boot_sect_print.asm
+; 依赖于 print.asm
 ; 参数在 dx 中
 print_hex:
   pusha               ; 保存寄存器状态
@@ -388,7 +391,7 @@ HEX_OUT:
   db '0x0000', 0
 ```
 
-同时，在 `sect_boot_print.asm` 中添加打印换行函数：
+同时，在 `boot/sect_boot_print.asm` 中添加打印换行函数：
 
 ```asm
 print_nl:
@@ -439,7 +442,7 @@ print_nl:
 
 据此，我们可以很容易地实现读取磁盘：
 
-`boot_sect.asm`:
+`boot/boot_sect.asm`:
 
 ```asm
 [org 0x7c00]
@@ -463,9 +466,9 @@ print_nl:
 
   jmp $
 
-%include "boot_sect_print.asm"
-%include "boot_sect_print_hex.asm"
-%include "boot_sect_disk.asm"
+%include "print.asm"
+%include "print_hex.asm"
+%include "disk.asm"
 
   BOOT_DRIVE: db 0
 
@@ -478,7 +481,7 @@ print_nl:
   times 256 dw 0xbabe ; 扇区 5 磁道 0 磁头 0
 ```
 
-`boot_sect_disk.asm`:
+`boot/disk.asm`:
 
 ```asm
 ; bx 存储数据要保存的位置
@@ -536,7 +539,7 @@ DISK_ERROR_MSG: db "[ERR] Disk read error", 0
 
 因此，我们只需要向 VGA 内存中写入字符，就可以在屏幕上显示出来。例如：
 
-`boot_sect_print_pm.asm`:
+`boot/print_pm.asm`:
 
 ```asm
 [bits 32]                  ; 32 位保护模式
@@ -612,7 +615,7 @@ print_pm:
 
 现在，我们可以照着上面的内容，写一个 GDT 了：
 
-`boot_sect_gdt.asm`：
+`boot/gdt.asm`：
 
 ```asm
 gdt_start:
@@ -662,7 +665,7 @@ DATA_SEG equ gdt_data - gdt_start
 
 根据以上流程，我们可以写出代码：
 
-`boot_sect_switch_to_pm.asm`：
+`boot/switch_to_pm.asm`：
 
 ```asm
 [bits 16]
@@ -696,7 +699,7 @@ switch_to_pm:
 
 现在，我们可以将所有的代码合并到一起了：
 
-`boot_sect.asm`：
+`boot/boot_sect.asm`：
 
 ```asm
 [org 0x7c00]
@@ -709,10 +712,10 @@ switch_to_pm:
   call switch_to_pm
   jmp $ ; 根本执行不到这里
 
-%include "boot_sect_print.asm"
-%include "boot_sect_gdt.asm"
-%include "boot_sect_print_pm.asm"
-%include "boot_sect_switch_to_pm.asm"
+%include "print.asm"
+%include "gdt.asm"
+%include "print_pm.asm"
+%include "switch_to_pm.asm"
 
 [bits 32]
 BEGIN_PM:
@@ -730,3 +733,25 @@ dw 0xaa55
 编译运行可以得到：
 
 ![切换完成效果](./imgs/finish_switch.jpg)
+
+最后我们再整理一下，当前的文件夹应该是这样的：
+
+```plaintext
+MiniOS
+└── boot
+    ├── boot_sect.asm
+    ├── disk.asm
+    ├── gdt.asm
+    ├── print.asm
+    ├── print_hex.asm
+    ├── print_pm.asm
+    └── switch_to_pm.asm
+```
+
+## 64 位长模式
+
+我们已经完成了从 16 位实模式到 32 位保护模式的切换。现在，我们要继续完成从 32 位保护模式到 64 位长模式的切换。
+
+### 64 位长模式
+
+64 位长模式是 Intel 64 和 AMD64 处理器的一种工作模式。在这种模式下，CPU 可以访问到 16 EB 的内存，寄存器全部变为 64 位，增加了 8 个新的寄存器，支持了更多的指令集。
