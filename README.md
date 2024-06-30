@@ -260,7 +260,7 @@ my_data:
   dw 0xaa55
 ```
 
-### Yet Another `Hello, World!`
+### Another `Hello, World!`
 
 我大胆假设一下，你的汇编水平和我卧龙凤雏。所以我不打算介绍基础的汇编知识了，直接上代码。
 
@@ -527,3 +527,206 @@ DISK_ERROR_MSG: db "[ERR] Disk read error", 0
 - 增加了 2 个新的段寄存器 `fs` 和 `gs`；
 - 内存偏移增加至 32 位，因此我们可以访问到 4 GB 的内存；
 - 支持了虚拟内存、内存保护等功能。
+
+### Yet Another `Hello, World!`
+
+在 32 位保护模式中，BIOS 就无法使用了。这让我们没法方便地调用系统中断来打印字符。但幸运的是，我们不需要当人肉显卡手操像素点！
+
+不管你的计算机是亮机卡还是 4090，在进入 32 位保护模式时都会从 VGA（Video Graphics Array）开始。VGA 能够打印出 80×25 的字符，并且可以给它们设置颜色、样式等。VGA 位于内存 `0xb8000` 处，每个字符占用 2 个字节，第一个字节是字符的 ASCII 码，第二个字节是字符的颜色样式。
+
+因此，我们只需要向 VGA 内存中写入字符，就可以在屏幕上显示出来。例如：
+
+`boot_sect_print_pm.asm`:
+
+```asm
+[bits 32]                  ; 32 位保护模式
+
+VIDEO_MEMORY   equ 0xb8000 ; VGA 显示内存地址
+WHITE_ON_BLACK equ 0x0f    ; 白色文本，黑色背景
+
+print_pm:
+  pusha                    ; 保存寄存器状态
+  mov edx, VIDEO_MEMORY    ; 设置显存地址
+
+.print_pm_loop:
+  mov al, [ebx]            ; 取出 bx 指向的数据
+  mov ah, WHITE_ON_BLACK   ; 设置样式
+
+  cmp al, 0                ; 判断是否为字符串结尾
+  je .print_pm_done        ; 如果是，结束循环
+
+  mov [edx], ax            ; 将 ax 中的数据写入显存
+  add ebx, 1               ; 指向下一个字符
+  add edx, 2               ; 指向下一个字符的显存位置
+
+  jmp .print_pm_loop       ; 继续循环
+
+.print_pm_done:
+  popa                     ; 恢复寄存器状态
+  ret                      ; 返回
+```
+
+这个程序每次都会将字符串写到左上角，覆盖之前的字符串。但不用管它，我们马上就能用上 C 语言了，没必要在它身上浪费精力。
+
+当务之急是，这个打印函数怎么运行它？
+
+### GDT
+
+在进入 32 位保护模式之前，我们需要先设置好全局描述符表（GDT, Global Descriptor Table）。GDT 是一个表格，里面存储了段的信息，每个段的信息构成一个 8 字节的段描述符（SD, Segment Descriptor）。段描述符包括：
+
+- 32 位的段基址；
+- 20 位的段长；
+- 12 位的类型、特权级、段是否存在等信息。
+
+不知道是哪个脑洞大开的人搞出来的，段描述符并不是依次排开的。比如，段基址和段长就被拆分成了好几部分放在段描述符的各个角落。下图就是一个段描述符的[结构](https://pdos.csail.mit.edu/6.828/2008/readings/i386/s06_03.htm)：
+
+![SD 结构](./imgs/GDT.gif)
+
+尽管我们可以定义很多段。由于在内核中定义段要方便得多，因此在这里，我们通常只需要定义两个段：一个用于代码，一个用于数据。
+
+对于代码段，除了段基址和段长，这里面有一些 flags，包括：
+
+- `Type`：
+  - `A=0`：是否被访问过（用于 Debug 和虚拟内存）；
+  - `R=1`：是否可读（`1` = 可以读取其中的常量，`0` = 只能执行）；
+  - `C=0`：是否可以被更低特权级的代码段调用；
+  - `1`：是否是代码段；
+  - `1`：段类型（`0` = 系统段，`1` = 代码段或数据段）；
+- `DPL=00`：描述符特权级（`00` = 最高特权级，`11` = 最低特权级）；
+- `P=1`：段是否真实存在（`0` 用于虚拟内存）；
+- `AVL=0`：自行定义的位；
+- `L=0`：是否是 64 位代码段；
+- `D=1`：默认操作数大小（`0` = 16 位，`1` = 32 位）；
+- `G=1`：粒度（设置为 `1` 时会将基址左移 12 位，即将基址乘以 4KB）。
+
+数据段和代码段几乎一样，只是 `Type` 有所不同：
+
+- `Type`：
+  - `A=0`：是否被访问过（用于 Debug 和虚拟内存）；
+  - `W=1`：是否可写（`1` = 可以写入其中的数据，`0` = 只能读取）；
+  - `E=0`：扩展方向（`1` = 向上，`0` = 向下）；
+  - `0`：是否是代码段；
+  - `1`：段类型（`0` = 系统段，`1` = 代码段或数据段）。
+
+在写入段描述符之前，我们还需要设置 8 个字节的空描述符。这些描述符是为了让我们在忘记设置基址时，能够捕获到错误。
+
+现在，我们可以照着上面的内容，写一个 GDT 了：
+
+`boot_sect_gdt.asm`：
+
+```asm
+gdt_start:
+  dd 0x0 ; 空描述符（32 bit）
+  dd 0x0 ; 空描述符（32 bit）
+
+; 代码段
+gdt_code: 
+  dw 0xffff    ; 段长 00-15（16 bit）
+  dw 0x0       ; 段基址 00-15（16 bit）
+  db 0x0       ; 段基址16-23（8 bit）
+  db 10011010b ; flags（8 bit）
+  db 11001111b ; flags（4 bit）+ 段长 16-19（4 bit）
+  db 0x0       ; 段基址 24-31（8 bit）
+
+; 数据段
+gdt_data:
+  dw 0xffff    ; 段长 00-15（16 bit）
+  dw 0x0       ; 段基址 00-15（16 bit）
+  db 0x0       ; 段基址16-23（8 bit）
+  db 10010010b ; flags（8 bit）
+  db 11001111b ; flags（4 bit）+ 段长 16-19（4 bit）
+  db 0x0       ; 段基址 24-31（8 bit）
+
+gdt_end:
+
+; GDT 描述符
+gdt_descriptor:
+  dw gdt_end - gdt_start - 1 ; 比真实长度少 1（16 bit）
+  dd gdt_start                ; 基址（32 bit）
+
+; 常量
+CODE_SEG equ gdt_code - gdt_start
+DATA_SEG equ gdt_data - gdt_start
+```
+
+### 切换
+
+现在，我们已经准备好从 16 位实模式切换到 32 位保护模式了。我们需要做的是：
+
+1. 禁用中断。这是因为，BIOS 在 16 位实模式下的中断将不再适用于 32 位保护模式；
+2. 使用 `lgdt` 指令加载 GDT；
+3. 将 `cr0` 寄存器的第 0 位设置为 `1`，进入保护模式；
+4. 刷掉 CPU 的管道队列，确保接下来不会再去执行实模式的指令。这可以通过执行一个长距离的 `jmp` 来实现。我们需要将 `cs` 设置为 GDT 的位置；
+5. 更新所有段寄存器，让它们指向数据段；
+6. 更新栈的位置。
+
+根据以上流程，我们可以写出代码：
+
+`boot_sect_switch_to_pm.asm`：
+
+```asm
+[bits 16]
+switch_to_pm:
+  cli ; 禁用中断
+
+  lgdt [gdt_descriptor] ; 加载 GDT
+
+  mov eax, cr0 ; 将 CR0 寄存器的第 0 位置 1
+  or eax, 0x1
+  mov cr0, eax
+
+  jmp CODE_SEG:.init_pm ; 长距离的 jmp
+
+[bits 32]
+.init_pm:
+  mov ax, DATA_SEG ; 更新段寄存器
+  mov ds, ax
+  mov ss, ax
+  mov es, ax
+  mov fs, ax
+  mov gs, ax
+
+  mov ebp, 0x90000 ; 更新栈位置
+  mov esp, ebp
+
+  call BEGIN_PM ; 去执行接下来的代码
+```
+
+### 合体！
+
+现在，我们可以将所有的代码合并到一起了：
+
+`boot_sect.asm`：
+
+```asm
+[org 0x7c00]
+  mov bp, 0x9000
+  mov sp, bp
+
+  mov bx, MSG_REAL_MODE
+  call print
+
+  call switch_to_pm
+  jmp $ ; 根本执行不到这里
+
+%include "boot_sect_print.asm"
+%include "boot_sect_gdt.asm"
+%include "boot_sect_print_pm.asm"
+%include "boot_sect_switch_to_pm.asm"
+
+[bits 32]
+BEGIN_PM:
+  mov ebx, MSG_PROT_MODE
+  call print_pm
+  jmp $
+
+MSG_REAL_MODE db "Started in 16-bit real mode", 0
+MSG_PROT_MODE db "Loaded 32-bit protected mode", 0
+
+times 510-($-$$) db 0
+dw 0xaa55
+```
+
+编译运行可以得到：
+
+![切换完成效果](./imgs/finish_switch.jpg)
