@@ -10,7 +10,7 @@ typedef struct __attribute__((packed)) {
 
 volatile vga_char* TEXT_AREA = (vga_char*)VGA_BASE;
 
-void clearwin() {
+void print_clear() {
     vga_char clear_char = {
         .character = ' ',
         .color = STYLE_WHITE_ON_BLACK,
@@ -23,7 +23,7 @@ void clearwin() {
     return;
 }
 
-void putstr(const char* str) {
+void print_str(const char* str) {
     for (unsigned int i = 0; str[i] != '\0'; i++) {
         if (i >= VGA_LIMIT) {
             break;
@@ -41,8 +41,8 @@ void putstr(const char* str) {
 }
 
 extern void main(void) {
-    clearwin();
+    print_clear();
 
     const char* hello_world_msg = "Hello, Kernel!";
-    putstr(hello_world_msg);
+    print_str(hello_world_msg);
 }

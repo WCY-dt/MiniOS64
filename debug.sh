@@ -13,7 +13,8 @@ if [ ! -f "dist/MiniOS.img" ]; then
 fi
 
 # 使用 qemu-system-x86_64 运行 dist/MiniOS.img
-qemu-system-x86_64 -drive format=raw,file=dist/MiniOS.img
+qemu-system-x86_64 -drive format=raw,file=dist/MiniOS.img -s -S &
+gdb -ex "target remote localhost:1234" -ex "symbol-file kernel/dist/kernel.elf"
 
 # 检查 qemu 是否成功启动
 if [ $? -eq 0 ]; then

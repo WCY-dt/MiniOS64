@@ -1,4 +1,10 @@
 {
+  "files.exclude": {
+    "dist": true,
+    "**/dist": true,
+    ".gdb_history": true,
+    "*.txt": true,
+  },
   "markdownlint.config": {
     "MD024": false, // no-duplicate-heading: Multiple headings with the same content
     "MD026": false, // no-trailing-punctuation: Trailing punctuation in heading

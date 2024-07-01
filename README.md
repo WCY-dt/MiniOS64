@@ -9,10 +9,10 @@ sudo apt-get update
 sudo apt-get install nasm qemu gcc gcc-multilib
 ```
 
-你要是心情好的话，也可以再安装一下 xxd：
+你要是心情好的话，也可以再安装一些调试工具：
 
 ```bash
-sudo apt-get install xxd
+sudo apt-get install xxd gdb
 ```
 
 ## 系统，启动！
@@ -39,31 +39,29 @@ sudo apt-get install xxd
 
 我们暂时先写一个死循环：
 
-`boot/boot_sect.asm`：
+`boot/boot.asm`：
 
 ```asm
-; $ 表示当前地址
-; 跳转到当前地址就是死循环
-jmp $
+[bits 16]             ; 告诉汇编器我们是在 16 位下工作
 
-; $ 表示当前地址，$$ 表示当前段的开始地址
-; 510-($-$$) 计算出当前位置到 510 字节的距离，然后全部填充为 0
-times 510-($-$$) db 0
+jmp $                 ; $ 表示当前地址，跳转到当前地址就是死循环
 
-; 最后两个字节是 0xaa55
-dw 0xaa55
+times 510-($-$$) db 0 ; $ 表示当前地址，$$ 表示当前段的开始地址
+                      ; 510-($-$$) 计算出当前位置到 510 字节的距离，然后全部填充为 0
+
+dw 0xaa55             ; 最后两个字节是 0xaa55
 ```
 
 然后编译为二进制文件：
 
 ```bash
-nasm ./boot/boot_sect.asm -f bin -o ./boot/boot_sect.bin
+nasm ./boot/boot.asm -f bin -o ./boot/dist/boot.bin
 ```
 
 再使用 QEMU 运行：
 
 ```bash
-qemu-system-x86_64 ./boot/boot_sect.bin
+qemu-system-x86_64 ./boot/dist/boot.bin
 ```
 
 你会看到窗口中显示 `Booting from Hard Disk...`，然后它就开始执行我们的死循环了。
@@ -73,8 +71,10 @@ qemu-system-x86_64 ./boot/boot_sect.bin
 你也可以用下面的命令看看我们的 bin 文件内容是否如我们所想：
 
 ```bash
-xxd ./boot/boot_sect.bin
+xxd ./boot/dist/boot.bin
 ```
+
+值得一提的是，目前状态下的程序只能以 16 位运行，因此我们只能使用 16 位的寄存器和指令。我们在[后面的章节](#16-位实模式)会解释这一切，并逐步用上 64 位的寄存器和指令。
 
 ### `Hello, World!`
 
@@ -92,12 +92,12 @@ xxd ./boot/boot_sect.bin
 
 于是我们修改刚刚的代码：
 
-```asm
-  ; 设置 TTY 模式
-  mov ah, 0x0e
+`boot/boot.asm`：
 
-  ; 设置要打印的字符
-  mov al, 'H'
+```asm
+  mov ah, 0x0e           ; 设置 TTY 模式
+
+  mov al, 'H'            ; 设置要打印的字符
   int 0x10
   mov al, 'e'
   int 0x10
@@ -124,19 +124,16 @@ xxd ./boot/boot_sect.bin
   mov al, '!'
   int 0x10
 
-  ; 打印完成后死循环
-  jmp $
+  jmp $                 ; 打印完成后死循环
 
-  ; 填充 0
-  times 510-($-$$) db 0
+  times 510-($-$$) db 0 ; 填充 0
 
-  ; 最后两个字节是 0xaa55
-  dw 0xaa55
+  dw 0xaa55             ; 最后两个字节是 0xaa55
 ```
 
 现在，再次编译运行，便可以看到 `Hello, World!` 了。
 
-我推荐你用 `xxd ./boot/boot_sect.bin` 来查看编译后的二进制文件，看看这些汇编指令在二进制中到底是啥样的。
+我推荐你用 `xxd ./boot/dist/boot.bin` 来查看编译后的二进制文件，看看这些汇编指令在二进制中到底是啥样的。
 
 ### 内存地址
 
@@ -173,7 +170,11 @@ xxd ./boot/boot_sect.bin
 0x000000  +-----------------------+
 ```
 
+> 这张图还挺重要，我们之后会不断参考它。
+
 在汇编中，我们定义的数据都存储的相对地址。为了访问它们，我们需要将这些相对地址转换为绝对地址——也就是加上 `0x7c00`。例如：
+
+`boot/boot.asm`：
 
 ```asm
   mov ah, 0x0e
@@ -186,13 +187,15 @@ xxd ./boot/boot_sect.bin
   jmp $
 
 my_data:
-  db 'X'        ; db 表示 declare bytes
+  db 'X'          ; db 表示 declare bytes
 
   times 510-($-$$) db 0
   dw 0xaa55
 ```
 
 但是，每次都要加上 `0x7c00` 太麻烦了，我们可以使用 `org` 指令来设置全局偏移量（当前段的基地址）：
+
+`boot/boot.asm`：
 
 ```asm
 [org 0x7c00]
@@ -218,6 +221,8 @@ my_data:
 段基址可以存储在 4 个 16 位寄存器中，分别是 `cs`、`ds`、`ss` 和 `es`。存储的基址在计算时会左移 4 位，然后加上段内偏移量。例如，我将 `ds` 设置为 `0x7c0`，那么访问 `0x10` 时，实际上访问的是 `0x7c0 << 4 + 0x10 = 0x7c10`。
 
 因此，`[org 0x7c00]` 和把 `0x7c0` 传入 `ds` 是等价的：
+
+`boot/boot.asm`：
 
 ```asm
   mov ah, 0x0e
@@ -246,6 +251,8 @@ my_data:
 
 当然，也可以使用别的段寄存器，例如 `es`：
 
+`boot/boot.asm`：
+
 ```asm
   mov ah, 0x0e
 
@@ -269,17 +276,17 @@ my_data:
 
 我们可以将 `Hello, World!` 存储在内存中，然后通过循环打印出来：
 
-`boot/boot_sect.asm`:
+`boot/boot.asm`：
 
 ```asm
 [org 0x7c00]
 
   mov bx, HELLO_MSG ; 放入参数地址
-  call print        ; 调用打印函数
+  call print_16     ; 调用打印函数
 
   jmp $
 
-%include "print.asm"
+%include "real_mode/print.asm"
 
 HELLO_MSG:
   db 'Hello, World!', 0
@@ -288,27 +295,29 @@ HELLO_MSG:
   dw 0xaa55
 ```
 
-`boot/print.asm`:
+[`boot/real_mode/print.asm`](./boot/real_mode/print.asm):
 
 ```asm
-; 参数在 bx 中
-print:
-  pusha           ; 保存寄存器状态
+[bits 16]
 
-  mov ah, 0x0e    ; 设置 TTY 模式
+; @param bx: 指向字符串的指针
+print_16:
+  pusha              ; 保存寄存器状态
 
-.print_loop:
-  mov al, [bx]    ; 取出 bx 指向的数据
-  cmp al, 0       ; 判断是否为字符串结尾
-  je .print_done  ; 如果是，结束循环
+  mov ah, 0x0e       ; 设置 TTY 模式
 
-  int 0x10        ; 打印 al 中的数据
-  inc bx          ; 指向下一个字符
-  jmp .print_loop ; 继续循环
+.print_loop_16:
+  mov al, [bx]       ; 取出 bx 指向的数据
+  cmp al, 0          ; 判断是否为字符串结尾
+  je .print_done_16  ; 如果是，结束循环
 
-.print_done:
-  popa            ; 恢复寄存器状态
-  ret             ; 返回
+  int 0x10           ; 打印 al 中的数据
+  inc bx             ; 指向下一个字符
+  jmp .print_loop_16 ; 继续循环
+
+.print_done_16:
+  popa               ; 恢复寄存器状态
+  ret                ; 返回
 ```
 
 编译运行，你会看到 `Hello, World!` 被打印在屏幕上。
@@ -323,23 +332,24 @@ print:
 
 上一节中，我们已经实现了一个打印字符串的函数。现在，我们再来实现一个打印 16 进制的函数。
 
-`boot/boot_sect.asm`:
+`boot/boot.asm`:
 
 ```asm
 [org 0x7c00]
 
   mov bx, HELLO_MSG ; 放入参数地址
-  call print        ; 调用打印函数
+  call print_16     ; 调用打印函数
 
-  call print_nl     ; 调用打印换行函数
+  call print_nl_16  ; 调用打印换行函数
 
   mov dx, 0x1f6b    ; 放入参数
-  call print_hex    ; 调用打印 16 进制函数
+  call print_hex_16 ; 调用打印 16 进制函数
 
   jmp $
 
-%include "print.asm"
-%include "print_hex.asm"
+%include "real_mode/print.asm"
+%include "real_mode/print_nl.asm"
+%include "real_mode/print_hex.asm"
 
 HELLO_MSG:
   db 'Hello, World!', 0
@@ -348,64 +358,68 @@ HELLO_MSG:
   dw 0xaa55
 ```
 
-`boot/print_hex.asm`:
+[`boot/real_mode/print_hex.asm`](./boot/real_mode/print_hex.asm):
 
 ```asm
-; 依赖于 print.asm
-; 参数在 dx 中
-print_hex:
-  pusha               ; 保存寄存器状态
+[bits 16]
+
+; @depends print.asm
+; @param dx: 要打印的 16 位数据
+print_hex_16:
+  pusha                  ; 保存寄存器状态
   
-  mov cx, 5           ; 首先设置 HEX_OUT 的最后一位
+  mov cx, 5              ; 首先设置 HEX_OUT 的最后一位
 
-.print_hex_loop:
-  cmp cx, 1           ; 判断是否到达 HEX_OUT 的第一位 (x)
-  je .print_hex_done  ; 如果是，结束循环
+.print_hex_loop_16:
+  cmp cx, 1              ; 判断是否到达 HEX_OUT 的第一位 (x)
+  je .print_hex_done_16  ; 如果是，结束循环
 
-  mov ax, dx          ; 将 dx 中的数据放入 ax
-  and ax, 0xf         ; 取出 ax 的最后一位
+  mov ax, dx             ; 将 dx 中的数据放入 ax
+  and ax, 0xf            ; 取出 ax 的最后一位
 
-  mov bx, HEX_DIGITS  ; 取出 HEX_DIGITS 的地址
-  add bx, ax          ; 计算出对应的字符的地址
-  mov al, [bx]        ; 取出对应的字符
+  mov bx, HEX_DIGITS_16  ; 取出 HEX_DIGITS 的地址
+  add bx, ax             ; 计算出对应的字符的地址
+  mov al, [bx]           ; 取出对应的字符
 
-  mov bx, HEX_OUT     ; 取出 HEX_OUT 的地址
-  add bx, cx          ; 计算出要写入的位置
-  mov [bx], al        ; 将字符写入 HEX_OUT
+  mov bx, HEX_OUT_16     ; 取出 HEX_OUT 的地址
+  add bx, cx             ; 计算出要写入的位置
+  mov [bx], al           ; 将字符写入 HEX_OUT
 
-  shr dx, 4           ; 将 dx 右移 4 位
-  dec cx              ; 准备处理下一位
-  jmp .print_hex_loop ; 继续循环
+  shr dx, 4              ; 将 dx 右移 4 位
+  dec cx                 ; 准备处理下一位
+  jmp .print_hex_loop_16 ; 继续循环
 
-.print_hex_done:
-  mov bx, HEX_OUT
-  call print          ; 调用打印函数
+.print_hex_done_16:
+  mov bx, HEX_OUT_16
+  call print_16          ; 调用打印函数
 
-  popa                ; 恢复寄存器状态
-  ret                 ; 返回
+  popa                   ; 恢复寄存器状态
+  ret                    ; 返回
   
-HEX_DIGITS:
+HEX_DIGITS_16:
   db '0123456789ABCDEF'
 
-HEX_OUT:
+HEX_OUT_16:
   db '0x0000', 0
 ```
 
-同时，在 `boot/sect_boot_print.asm` 中添加打印换行函数：
+同时，在 [`boot/real_mode/print_nl.asm`](./boot/real_mode/print_nl.asm) 中添加打印换行函数：
 
 ```asm
-print_nl:
-  pusha        ; 保存寄存器状态
-  
-  mov ah, 0x0e ; 设置 TTY 模式
+[bits 16]
 
-  mov al, 0x0a ; 换行符
-  int 0x10     ; 打印换行符
-  mov al, 0x0d ; 回车符
-  int 0x10     ; 打印回车符
+print_nl_16:
+  pusha           ; 保存寄存器状态
   
-  popa         ; 恢复寄存器状态
-  ret          ; 返回
+  mov ah, 0x0e    ; 设置 TTY 模式
+
+  mov al, 0x0a    ; 换行符
+  int 0x10        ; 打印换行符
+  mov al, 0x0d    ; 回车符
+  int 0x10        ; 打印回车符
+  
+  popa            ; 恢复寄存器状态
+  ret             ; 返回
 ```
 
 编译运行，你会看到 `Hello, World!` 和 `0x1F6B` 被打印在屏幕上。
@@ -442,33 +456,35 @@ print_nl:
 
 据此，我们可以很容易地实现读取磁盘：
 
-`boot/boot_sect.asm`:
+`boot/boot.asm`:
 
 ```asm
 [org 0x7c00]
   mov [BOOT_DRIVE], dl   ; 保存启动驱动器号
 
-  mov bp, 0x8000         ; 将栈指针移动到安全位置
+  mov bp, 0x0500         ; 将栈指针移动到安全位置
   mov sp, bp
 
-  mov bx, 0x9000         ; 存储数据的位置在 [es:bx] 中，其中 es = 0x0000
-  mov dh, 0x04           ; 读取 4 个扇区 (0x01 .. 0x80)
-  mov dl, [BOOT_DRIVE]   ; 0 = floppy, 1 = floppy2, 0x80 = hdd, 0x81 = hdd2
-  call disk_load
+  mov bx, 0x7e00        ; 将数据存储在 512 字节的 Loaded Boot Sector
+                        ; 位置在 [es:bx] 中，其中 es = 0x0000
+  mov cl, 0x02          ; 从第 2 个扇区开始
+  mov dh, 4             ; 读取 4 个扇区 (0x01 .. 0x80)
+  mov dl, [BOOT_DRIVE]  ; 0 = floppy, 1 = floppy2, 0x80 = hdd, 0x81 = hdd2
+  call disk_load_16     ; 读取磁盘数据
 
-  mov dx, [0x9000]       ; 扇区 2 磁道 0 磁头 0 的第一个字
-  call print_hex
+  mov dx, [0x7e00]       ; 扇区 2 磁道 0 磁头 0 的第一个字
+  call print_hex_16
 
-  call print_nl
+  call print_nl_16
 
-  mov dx, [0x9000 + 1536] ; 扇区 5 磁道 0 磁头 0 的第一个字
-  call print_hex
+  mov dx, [0x7e00 + 1536] ; 扇区 5 磁道 0 磁头 0 的第一个字
+  call print_hex_16
 
   jmp $
 
-%include "print.asm"
-%include "print_hex.asm"
-%include "disk.asm"
+%include "real_mode/print.asm"
+%include "real_mode/print_nl.asm"
+%include "real_mode/print_hex.asm"
 
   BOOT_DRIVE: db 0
 
@@ -481,37 +497,40 @@ print_nl:
   times 256 dw 0xbabe ; 扇区 5 磁道 0 磁头 0
 ```
 
-`boot/disk.asm`:
+[`boot/real_mode/disk.asm`](./boot/real_mode/disk.asm):
 
 ```asm
-; bx 存储数据要保存的位置
-; dh 存储要读取的扇区数
-; dl 存储要读取的驱动器号
-disk_load:
-  push dx         ; 保存要读取的扇区数
+[bits 16]
 
-  mov ah, 0x02    ; 表明是读取
+; @depends print.asm
+; @param bx: 存储数据要保存的位置
+; @param cl: 存储开始要读取的扇区号
+; @param dh: 存储要读取的扇区数
+; @param dl: 存储要读取的驱动器号
+disk_load_16:
+  push dx            ; 保存要读取的扇区数
 
-  mov al, dh      ; 要读取的扇区数
-  mov dh, 0x00    ; 从第 0 个磁头 (0x0 .. 0xF) 开始
-  mov ch, 0x00    ; 从第 0 个磁道 (0x0 .. 0x3FF, 其中最高两位在 cl 中) 开始
-  mov cl, 0x02    ; 从第 2 个扇区 (0x01 .. 0x11) 开始
+  mov ah, 0x02       ; 表明是读取
+
+  mov al, dh         ; 要读取的扇区数
+  mov dh, 0x00       ; 从第 0 个磁头 (0x0 .. 0xF) 开始
+  mov ch, 0x00       ; 从第 0 个磁道 (0x0 .. 0x3FF, 其中最高两位在 cl 中) 开始
   
-  int 0x13        ; BIOS 磁盘服务中断
-  jc .disk_error  ; 如果读取失败，跳转
+  int 0x13           ; BIOS 磁盘服务中断
+  jc .disk_error_16  ; 如果读取失败，跳转
 
-  pop dx          ; 要读取的扇区数
-  cmp dh, al      ; 检查读取的扇区数是否正确
-  jne .disk_error ; 如果不正确，跳转
+  pop dx             ; 要读取的扇区数
+  cmp dh, al         ; 检查读取的扇区数是否正确
+  jne .disk_error_16 ; 如果不正确，跳转
 
   ret
 
-.disk_error:
-  mov bx, DISK_ERROR_MSG
-  call print
+.disk_error_16:
+  mov bx, DISK_ERROR_MSG_16
+  call print_16
   jmp $
 
-DISK_ERROR_MSG: db "[ERR] Disk read error", 0
+DISK_ERROR_MSG_16: db "[ERR] Disk read error", 0
 ```
 
 编译运行后，你会看到 `0xdead` 和 `0xbabe` 被打印在屏幕上。
@@ -520,7 +539,7 @@ DISK_ERROR_MSG: db "[ERR] Disk read error", 0
 
 ### 16 位实模式
 
-计算机是充满妥协的，当你设计出一个新东西的时候，总是要考虑向下兼容。
+我们之前一直在 16 位下工作，这是因为计算机是充满妥协的，当你设计出一个新东西的时候，总是要考虑向下兼容。
 
 对于刚开始启动的计算机来讲，当然不知道操作系统是多少位的。为了兼容，它只能先进入一个 16 位的模式——`16 位实模式`。实模式是 Intel 8086 处理器的一种工作模式，在实模式下，CPU 只能访问 1MB 的内存，而且只能使用 16 位的寄存器。
 
@@ -531,6 +550,8 @@ DISK_ERROR_MSG: db "[ERR] Disk read error", 0
 - 内存偏移增加至 32 位，因此我们可以访问到 4 GB 的内存；
 - 支持了虚拟内存、内存保护等功能。
 
+当然，在这之后，还可以进入 `64 位长模式`，我们[后文](#64-位长模式)会具体介绍。但现在，让我们先从 32 位保护模式开始。
+
 ### Yet Another `Hello, World!`
 
 在 32 位保护模式中，BIOS 就无法使用了。这让我们没法方便地调用系统中断来打印字符。但幸运的是，我们不需要当人肉显卡手操像素点！
@@ -539,41 +560,89 @@ DISK_ERROR_MSG: db "[ERR] Disk read error", 0
 
 因此，我们只需要向 VGA 内存中写入字符，就可以在屏幕上显示出来。例如：
 
-`boot/print_pm.asm`:
+[`boot/protected_mode/print.asm`](./boot/protected_mode/print.asm):
 
 ```asm
-[bits 32]                  ; 32 位保护模式
+[bits 32]
 
-VIDEO_MEMORY   equ 0xb8000 ; VGA 显示内存地址
-WHITE_ON_BLACK equ 0x0f    ; 白色文本，黑色背景
+; @param esi: 指向字符串的指针
+print_32:
+  pusha                       ; 保存寄存器状态
+  mov edx, VGA_BASE_32        ; 设置显存地址
 
-print_pm:
-  pusha                    ; 保存寄存器状态
-  mov edx, VIDEO_MEMORY    ; 设置显存地址
+.print_loop_32:
+  mov al, [esi]               ; 取出 bx 指向的数据
+  mov ah, WHITE_ON_BLACK_32   ; 设置样式
 
-.print_pm_loop:
-  mov al, [ebx]            ; 取出 bx 指向的数据
-  mov ah, WHITE_ON_BLACK   ; 设置样式
+  cmp al, 0                   ; 判断是否为字符串结尾
+  je .print_done_32           ; 如果是，结束循环
 
-  cmp al, 0                ; 判断是否为字符串结尾
-  je .print_pm_done        ; 如果是，结束循环
+  mov [edx], ax               ; 将 ax 中的数据写入显存
+  
+  add esi, 1                  ; 指向下一个字符
+  add edx, 2                  ; 指向下一个字符的显存位置
 
-  mov [edx], ax            ; 将 ax 中的数据写入显存
-  add ebx, 1               ; 指向下一个字符
-  add edx, 2               ; 指向下一个字符的显存位置
+  jmp .print_loop_32          ; 继续循环
 
-  jmp .print_pm_loop       ; 继续循环
-
-.print_pm_done:
-  popa                     ; 恢复寄存器状态
-  ret                      ; 返回
+.print_done_32:
+  popa                        ; 恢复寄存器状态
+  ret                         ; 返回
 ```
 
-这个程序每次都会将字符串写到左上角，覆盖之前的字符串。但不用管它，我们马上就能用上 C 语言了，没必要在它身上浪费精力。
+这个程序每次都会将字符串写到左上角，覆盖之前的字符串。其中，有一些常量，如 `VGA_BASE_32`、`WHITE_ON_BLACK_32` 等，可以在 `boot/boot.asm` 中定义它们：
 
-当务之急是，这个打印函数怎么运行它？
+```asm
+VGA_BASE_32       equ 0x000b8000  ; VGA 显示内存地址
+VGA_LIMIT_32      equ 80 * 25 * 2 ; VGA 显示内存地址限制
+WHITE_ON_BLACK_32 equ 0x0f        ; 白色文本，黑色背景
+```
+
+但字符串互相叠着会很难看，我们可以再写一个清空屏幕的函数：
+
+[`boot/protected_mode/print_clear.asm`](./boot/protected_mode/print_clear.asm)：
+
+```asm
+[bits 32]
+
+print_clear_32:
+  pusha
+
+  mov ebx, VGA_LIMIT_32 ; 显示内存地址限制
+  mov ecx, VGA_BASE_32 ; 设置显存地址
+  mov edx, 0 ; 指向当前要写入的位置
+
+.print_clear_loop_32:
+  cmp edx, ecx ; 判断是否到达显示内存地址限制
+  jge .print_clear_done_32 ; 如果是，结束循环
+
+  push edx
+
+  mov al, SPACE_CHAR_32 ; 设置空格字符
+  mov ah, WHITE_ON_BLACK_32 ; 设置样式
+
+  add edx, ecx ; 计算显示内存地址
+  mov [edx], ax ; 将 ax 中的数据写入显存
+
+  pop edx; 恢复 edx
+  
+  add edx, 2 ; 指向下一个字符的显存位置
+  
+  jmp .print_clear_loop_32 ; 继续循环
+
+.print_clear_done_32:
+  popa
+  ret
+
+SPACE_CHAR_32 equ 0x20 ; 空格字符
+```
+
+当然，现在的这个打印函数还很简陋。但不用管它，我们只需要它打印出必要信息即可。不久之后我们就能用上 C 语言了，没必要在它身上浪费精力。
+
+现在的当务之急是，这个打印函数怎么运行它？
 
 ### GDT
+
+答案是，运行这个 32 位的打印函数需要先进入 32 位保护模式。
 
 在进入 32 位保护模式之前，我们需要先设置好全局描述符表（GDT, Global Descriptor Table）。GDT 是一个表格，里面存储了段的信息，每个段的信息构成一个 8 字节的段描述符（SD, Segment Descriptor）。段描述符包括：
 
@@ -615,41 +684,43 @@ print_pm:
 
 现在，我们可以照着上面的内容，写一个 GDT 了：
 
-`boot/gdt.asm`：
+[`boot/real_mode/gdt.asm`](./boot/real_mode/gdt.asm)：
 
 ```asm
-gdt_start:
-  dd 0x0 ; 空描述符（32 bit）
-  dd 0x0 ; 空描述符（32 bit）
+[bits 16]
+
+gdt_start_32:
+  dd 0x00000000 ; 空描述符（32 bit）
+  dd 0x00000000 ; 空描述符（32 bit）
 
 ; 代码段
-gdt_code: 
-  dw 0xffff    ; 段长 00-15（16 bit）
-  dw 0x0       ; 段基址 00-15（16 bit）
-  db 0x0       ; 段基址16-23（8 bit）
-  db 10011010b ; flags（8 bit）
-  db 11001111b ; flags（4 bit）+ 段长 16-19（4 bit）
-  db 0x0       ; 段基址 24-31（8 bit）
+gdt_code_32: 
+  dw 0xffff     ; 段长 00-15（16 bit）
+  dw 0x0000     ; 段基址 00-15（16 bit）
+  db 0x00       ; 段基址16-23（8 bit）
+  db 0b10011010 ; flags（8 bit）
+  db 0b11001111 ; flags（4 bit）+ 段长 16-19（4 bit）
+  db 0x00       ; 段基址 24-31（8 bit）
 
 ; 数据段
-gdt_data:
-  dw 0xffff    ; 段长 00-15（16 bit）
-  dw 0x0       ; 段基址 00-15（16 bit）
-  db 0x0       ; 段基址16-23（8 bit）
-  db 10010010b ; flags（8 bit）
-  db 11001111b ; flags（4 bit）+ 段长 16-19（4 bit）
-  db 0x0       ; 段基址 24-31（8 bit）
+gdt_data_32:
+  dw 0xffff     ; 段长 00-15（16 bit）
+  dw 0x0000     ; 段基址 00-15（16 bit）
+  db 0x00       ; 段基址16-23（8 bit）
+  db 0b10010010 ; flags（8 bit）
+  db 0b11001111 ; flags（4 bit）+ 段长 16-19（4 bit）
+  db 0x00       ; 段基址 24-31（8 bit）
 
-gdt_end:
+gdt_end_32:
 
 ; GDT 描述符
-gdt_descriptor:
-  dw gdt_end - gdt_start - 1 ; 比真实长度少 1（16 bit）
-  dd gdt_start                ; 基址（32 bit）
+gdt_descriptor_32:
+  dw gdt_end_32 - gdt_start_32 - 1 ; 比真实长度少 1（16 bit）
+  dd gdt_start_32                  ; 基址（32 bit）
 
 ; 常量
-CODE_SEG equ gdt_code - gdt_start
-DATA_SEG equ gdt_data - gdt_start
+CODE_SEG_32 equ gdt_code_32 - gdt_start_32
+DATA_SEG_32 equ gdt_data_32 - gdt_start_32
 ```
 
 ### 切换
@@ -665,24 +736,26 @@ DATA_SEG equ gdt_data - gdt_start
 
 根据以上流程，我们可以写出代码：
 
-`boot/switch_to_pm.asm`：
+[`boot/real_mode/elevate.asm`](./boot/real_mode/elevate.asm)：
 
 ```asm
 [bits 16]
-switch_to_pm:
+
+elevate_32:
   cli ; 禁用中断
 
-  lgdt [gdt_descriptor] ; 加载 GDT
+  lgdt [gdt_descriptor_32] ; 加载 GDT
 
   mov eax, cr0 ; 将 CR0 寄存器的第 0 位置 1
   or eax, 0x1
   mov cr0, eax
 
-  jmp CODE_SEG:.init_pm ; 长距离的 jmp
+  jmp CODE_SEG_32:.init_pm_32 ; 长距离的 jmp
 
 [bits 32]
-.init_pm:
-  mov ax, DATA_SEG ; 更新段寄存器
+
+.init_pm_32:
+  mov ax, DATA_SEG_32 ; 更新段寄存器
   mov ds, ax
   mov ss, ax
   mov es, ax
@@ -692,66 +765,180 @@ switch_to_pm:
   mov ebp, 0x90000 ; 更新栈位置
   mov esp, ebp
 
-  call BEGIN_PM ; 去执行接下来的代码
+  call BEGIN_PM_32 ; 去执行接下来的代码
 ```
 
 ### 合体！
 
-现在，我们可以将所有的代码合并到一起了：
+现在，我们可以将所有的代码合并到一起了。这里，我们选择将 32 位的代码放置在磁盘上一个单独的扇区，并在 16 位下通过已经实现的读取磁盘功能加载它：
 
-`boot/boot_sect.asm`：
+`boot/boot.asm`：
 
 ```asm
 [org 0x7c00]
-  mov bp, 0x9000
-  mov sp, bp
 
-  mov bx, MSG_REAL_MODE
-  call print
+; 16 位实模式
+BEGIN_RM_16:
+[bits 16]
 
-  call switch_to_pm
-  jmp $ ; 根本执行不到这里
+  mov bp, 0x0500        ; 将栈指针移动到安全位置
+  mov sp, bp            ; 使其向着 256 字节的 BIOS Data Area 增长
 
-%include "print.asm"
-%include "gdt.asm"
-%include "print_pm.asm"
-%include "switch_to_pm.asm"
+  mov [BOOT_DRIVE], dl
 
+  mov bx, 0x7e00        ; 将数据存储在 512 字节的 Loaded Boot Sector
+  mov cl, 0x02          ; 从第 2 个扇区开始
+  mov dh, 1             ; 读取 1 个扇区
+  mov dl, [BOOT_DRIVE]  ; 读取的驱动器号
+  call disk_load_16     ; 读取磁盘数据
+
+  mov bx, MSG_REAL_MODE ; 打印模式信息
+  call print_16
+
+  call elevate_32       ; 进入 32 位保护模式
+
+.boot_hold_16:
+  jmp $                 ; 根本执行不到这里
+
+%include "real_mode/print.asm"
+%include "real_mode/disk.asm"
+%include "real_mode/gdt.asm"
+%include "real_mode/elevate.asm"
+
+BOOT_DRIVE    db 0
+MSG_REAL_MODE db "Started 16-bit real mode", 0
+
+times 510-($-$$) db 0 ; 填充 0
+dw 0xaa55             ; 结束标志
+
+BOOT_SECTOR_EXTENDED_32:
+; 32 位保护模式
+BEGIN_PM_32:
 [bits 32]
-BEGIN_PM:
-  mov ebx, MSG_PROT_MODE
-  call print_pm
+
+  call print_clear_32       ; 清屏
+
+  mov esi, MSG_PROT_MODE    ; 打印模式信息
+  call print_32
+
+.boot_hold_32:
   jmp $
 
-MSG_REAL_MODE db "Started in 16-bit real mode", 0
-MSG_PROT_MODE db "Loaded 32-bit protected mode", 0
+%include "protected_mode/print.asm"
+%include "protected_mode/print_clear.asm"
 
-times 510-($-$$) db 0
-dw 0xaa55
+VGA_BASE_32       equ 0x000b8000  ; VGA 显示内存地址
+VGA_LIMIT_32      equ 80 * 25 * 2 ; VGA 显示内存地址限制
+WHITE_ON_BLACK_32 equ 0x0f        ; 白色文本，黑色背景
+
+MSG_PROT_MODE    db "Loaded 32-bit protected mode", 0
+
+times 512 - ($ - BOOT_SECTOR_EXTENDED_32) db 0 ; 填充 0
 ```
 
 编译运行可以得到：
 
-![切换完成效果](./imgs/finish_switch.jpg)
+![切换完成效果](./imgs/finish_protected.jpg)
 
-最后我们再整理一下，当前的文件夹应该是这样的：
+如果你跟上了节奏的话，当前的文件夹应该是这样的：
 
 ```plaintext
 MiniOS
 └── boot
-    ├── boot_sect.asm
-    ├── disk.asm
-    ├── gdt.asm
-    ├── print.asm
-    ├── print_hex.asm
-    ├── print_pm.asm
-    └── switch_to_pm.asm
+    ├── real_mode
+    │   ├── disk.asm
+    │   ├── elevate.asm
+    │   ├── gdt.asm
+    │   ├── print_hex.asm
+    │   ├── print_nl.asm
+    │   └── print.asm
+    ├── protected_mode
+    │   ├── print_clear.asm
+    │   └── print.asm
+    └── boot.asm
 ```
+
+每次编译运行还是比较麻烦的，我们可以写两个 shell 来简化工作：
+
+`boot/build.sh`：
+
+```bash
+#!/bin/bash
+
+# 检查 nasm 是否已安装
+if ! command -v nasm >/dev/null 2>&1; then
+    echo "nasm could not be found, please install it first."
+    exit 1
+fi
+
+# 检查源文件是否存在
+if [ ! -f "boot.asm" ]; then
+    echo "Source file boot.asm not found."
+    exit 1
+fi
+
+# 创建输出目录（如果不存在）
+mkdir -p dist
+
+# 编译源文件
+nasm -f bin boot.asm -o dist/boot.bin
+
+# 检查编译是否成功
+if [ $? -eq 0 ]; then
+    echo "Compilation successful. Output file is located at dist/boot.bin"
+else
+    echo "Compilation failed."
+    exit 1
+fi
+```
+
+`debug.sh`：
+
+```bash
+#!/bin/bash
+
+# 检查 qemu-system-x86_64 是否已安装
+if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
+    echo "qemu-system-x86_64 could not be found, please install it first."
+    exit 1
+fi
+
+# 检查 dist/boot.bin 文件是否存在
+if [ ! -f "dist/boot.bin" ]; then
+    echo "Boot file dist/boot.bin not found, please run build.sh first."
+    exit 1
+fi
+
+# 使用 qemu-system-x86_64 运行 dist/boot.bin
+qemu-system-x86_64 -drive format=raw,file=dist/boot.bin
+
+# 检查 qemu 是否成功启动
+if [ $? -eq 0 ]; then
+    echo "qemu-system-x86_64 successfully started the boot image."
+else
+    echo "Failed to start qemu-system-x86_64 with the boot image."
+    exit 1
+fi
+```
+
+之后，我们每次编写玩程序后，只需要在 `boot` 文件夹下运行 `sh build.sh` 编译，然后运行 `sh debug.sh` 运行即可。
 
 ## 64 位长模式
 
-我们已经完成了从 16 位实模式到 32 位保护模式的切换。现在，我们要继续完成从 32 位保护模式到 64 位长模式的切换。
+### 能用 64 位吗？
 
-### 64 位长模式
+我们已经完成了从 16 位实模式到 32 位保护模式的切换。但我们的目标是，遥遥领先。因此，我们要继续完成从 32 位保护模式到 64 位长模式的切换。
 
-64 位长模式是 Intel 64 和 AMD64 处理器的一种工作模式。在这种模式下，CPU 可以访问到 16 EB 的内存，寄存器全部变为 64 位，增加了 8 个新的寄存器，支持了更多的指令集。
+和之前的切换类似，64 位长模式相较于 32 位保护模式带来的好处有：
+
+- 64 位、且更多的寄存器。包括 `rax`、`rbx`、`rcx`、`rdx`、`rsi`、`rdi`、`rbp`、`rsp`、`r8`、`r9`、`r10`、`r11`、`r12`、`r13`、`r14`、`r15` 等；
+- 更大的虚拟地址空间。64 位长模式下，CPU 可以访问到 2^64 个字节的内存；
+- 更多的指令。64 位长模式下，CPU 支持更多的指令，包括 SSE、AVX 等。
+
+但是，从 32 位切换至 64 位相较于从 16 位切换到 32 位有很大不同。最先需要考虑的就是，部分 CPU 不支持 64 位长模式，在切换前需要检查支持情况。只有支持 64 位的 CPU 才能进入 64 位长模式。
+
+检查支持情况可以直接通过 `CPUID` 指令的扩展功能来实现。但是，这包含了 3 个隐含操作：
+
+1. 检查 CPU 是否支持 `CPUID` 指令；
+2. 检查 `CPUID` 指令是否支持扩展功能；
+3. 使用 `CPUID` 指令的扩展功能检查是否支持 64 位长模式。
