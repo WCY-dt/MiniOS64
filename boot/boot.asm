@@ -11,7 +11,7 @@ BEGIN_RM_16:
 
   mov bx, 0x7e00        ; 将数据存储在 512 字节的 Loaded Boot Sector
   mov cl, 0x02          ; 从第 2 个扇区开始
-  mov dh, 24             ; 读取 n 个扇区
+  mov dh, 3             ; 读取 n 个扇区
   mov dl, [BOOT_DRIVE]  ; 读取的驱动器号
   call disk_load_16     ; 读取磁盘数据
 

@@ -10,7 +10,7 @@ C_SRC = $(wildcard src/*.c)
 ASM_SRC = $(wildcard *.asm)
 
 CCFLAGS = -c -ffreestanding -g
-LDFLAGS = -Ttext 0x8200
+LDFLAGS = -T kernel.ld
 LDFLAGS_BIN = ${LDFLAGS} --oformat binary
 ASMFLAGS = -f elf64
 
@@ -21,7 +21,7 @@ directories:
 
 kernel.bin: $(OUT_DIR)/kernel.o $(OUT_DIR)/entry.o
 	@echo "===Linking kernel==="
-	${LD} ${LDFLAGS} -o ${OUT_DIR}/$@ $^
+	${LD} ${LDFLAGS_BIN} -o ${OUT_DIR}/$@ $^
 
 kernel.elf : $(OUT_DIR)/kernel.o $(OUT_DIR)/entry.o
 	@echo "===Linking kernel==="

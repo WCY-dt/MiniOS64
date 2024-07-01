@@ -19,11 +19,10 @@ then
     cat ./boot/dist/boot.bin ./kernel/dist/kernel.bin > ./dist/MiniOS.img
 
     fsize=$(wc -c < ./dist/MiniOS.img)
-    sectors=$(( ($fsize + 511) / 512 ))
-    dd if=/dev/zero bs=1 count=$(( 512 * sectors - fsize )) >> ./dist/MiniOS.img
+    sectors=$(( ($fsize + 511) / 512 - 1 ))
 
     echo "Build finished successfully"
-    echo "ALERT: Adjust boot sector to load $sectors sectors"
+    echo "**ALERT: Adjust boot sector to load $sectors sectors**"
 else
     result=`expr $boot_result + $make_result`
     echo "Build failed with error code $result. See output for more info."
