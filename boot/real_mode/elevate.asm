@@ -12,6 +12,7 @@ elevate_32:
   jmp CODE_SEG_32:.init_pm_32 ; 长距离的 jmp
 
 [bits 32]
+
 .init_pm_32:
   mov ax, DATA_SEG_32 ; 更新段寄存器
   mov ds, ax

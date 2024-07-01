@@ -1,12 +1,9 @@
 [bits 32]
 
-VIDEO_MEMORY_32   equ 0xb8000 ; VGA 显示内存地址
-WHITE_ON_BLACK_32 equ 0x0f    ; 白色文本，黑色背景
-
 ; @param esi: 指向字符串的指针
 print_32:
   pusha                       ; 保存寄存器状态
-  mov edx, VIDEO_MEMORY_32    ; 设置显存地址
+  mov edx, VGA_BASE_32        ; 设置显存地址
 
 .print_loop_32:
   mov al, [esi]               ; 取出 bx 指向的数据
@@ -16,6 +13,7 @@ print_32:
   je .print_done_32           ; 如果是，结束循环
 
   mov [edx], ax               ; 将 ax 中的数据写入显存
+  
   add esi, 1                  ; 指向下一个字符
   add edx, 2                  ; 指向下一个字符的显存位置
 

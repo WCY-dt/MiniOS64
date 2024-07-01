@@ -1,6 +1,7 @@
 [bits 32]
 
 ; @depends print.asm
+; @depends print_clear.asm
 check_elevate_32:
   pusha ; 保存寄存器状态
 
@@ -39,24 +40,27 @@ check_elevate_32:
   test edx, 0x20000000 ; 检查第 29 位是否为 1
   jz .no_lm_32
 
-  popa ; 恢复寄存器状态
+  popa                 ; 恢复寄存器状态
   ret
 
 .no_cpuid_32:
+  call print_clear_32
   mov esi, NO_CPUID_MSG_32
   call print_32
   jmp $
 
 .no_cpuid_extend_function_32:
+  call print_clear_32
   mov esi, NO_EXTEND_MSG_32
   call print_32
   jmp $
 
 .no_lm_32:
+  call print_clear_32
   mov esi, NO_LM_MSG_32
   call print_32
   jmp $
 
-NO_CPUID_MSG_32  db "[ERR] CPUID instruction is not supported",   0
-NO_EXTEND_MSG_32 db "[ERR] Extended functions are not supported", 0
-NO_LM_MSG_32     db "[ERR] Long mode is not supported",           0
+NO_CPUID_MSG_32  db "[ERR] CPUID not supported",   0
+NO_EXTEND_MSG_32 db "[ERR] Extended functions not supported", 0
+NO_LM_MSG_32     db "[ERR] Long mode not supported",           0
