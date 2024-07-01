@@ -1,4 +1,4 @@
-#define VGA_BASE  0xB8000
+#define VGA_BASE 0xB8000
 #define VGA_LIMIT 80 * 25
 
 #define STYLE_WHITE_ON_BLACK 0x0F
@@ -8,9 +8,9 @@ typedef struct __attribute__((packed)) {
     char color;
 } vga_char;
 
-volatile vga_char *TEXT_AREA = (vga_char *)VGA_BASE;
+volatile vga_char* TEXT_AREA = (vga_char*)VGA_BASE;
 
-void print_clear() {
+void clearwin() {
     vga_char clear_char = {
         .character = ' ',
         .color = STYLE_WHITE_ON_BLACK,
@@ -19,9 +19,11 @@ void print_clear() {
     for (unsigned int i = 0; i < VGA_LIMIT; i++) {
         TEXT_AREA[i] = clear_char;
     }
+
+    return;
 }
 
-void print_string(const char *str) {
+void putstr(const char* str) {
     for (unsigned int i = 0; str[i] != '\0'; i++) {
         if (i >= VGA_LIMIT) {
             break;
@@ -34,13 +36,13 @@ void print_string(const char *str) {
 
         TEXT_AREA[i] = temp;
     }
+
+    return;
 }
 
-int main() {
-    print_clear();
+extern void main(void) {
+    clearwin();
 
-    const char *hello_world_msg = "Hello, Kernel!";
-    print_string(hello_world_msg);
-
-    return 0;
+    const char* hello_world_msg = "Hello, Kernel!";
+    putstr(hello_world_msg);
 }

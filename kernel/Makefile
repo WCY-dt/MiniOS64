@@ -9,7 +9,7 @@ INCLUDE = -Iinclude
 C_SRC = $(wildcard src/*.c)
 ASM_SRC = $(wildcard *.asm)
 
-CCFLAGS = -c -ffreestanding -g
+CCFLAGS = -c -ffreestanding -ggdb
 LDFLAGS = -T kernel.ld
 LDFLAGS_BIN = ${LDFLAGS} --oformat binary
 ASMFLAGS = -f elf64
@@ -19,11 +19,11 @@ all: directories kernel.bin kernel.elf
 directories:
 	@mkdir -p $(OUT_DIR)
 
-kernel.bin: $(OUT_DIR)/kernel.o $(OUT_DIR)/entry.o
+kernel.bin: $(OUT_DIR)/entry.o $(OUT_DIR)/kernel.o
 	@echo "===Linking kernel==="
 	${LD} ${LDFLAGS_BIN} -o ${OUT_DIR}/$@ $^
 
-kernel.elf : $(OUT_DIR)/kernel.o $(OUT_DIR)/entry.o
+kernel.elf : $(OUT_DIR)/entry.o $(OUT_DIR)/kernel.o
 	@echo "===Linking kernel==="
 	${LD} ${LDFLAGS} -o ${OUT_DIR}/$@ $^
 
