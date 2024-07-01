@@ -11,7 +11,7 @@ BEGIN_RM_16:
 
   mov bx, 0x7e00        ; 将数据存储在 512 字节的 Loaded Boot Sector
   mov cl, 0x02          ; 从第 2 个扇区开始
-  mov dh, 0x02          ; 读取 2 个扇区
+  mov dh, 24             ; 读取 n 个扇区
   mov dl, [BOOT_DRIVE]  ; 读取的驱动器号
   call disk_load_16     ; 读取磁盘数据
 
@@ -83,6 +83,8 @@ BEGIN_LM_64:
   mov rsi, MSG_LONG_MODE
   call print_64
 
+  call KERNEL_START
+
 .boot_hold_64:
   jmp $
 
@@ -92,6 +94,8 @@ BEGIN_LM_64:
 VGA_BASE_64       equ 0x000b8000  ; VGA 显示内存地址
 VGA_LIMIT_64      equ 80 * 25 * 2 ; VGA 显示内存地址限制
 WHITE_ON_BLUE_64  equ 0x1f        ; 白色文本，蓝色背景
+
+KERNEL_START      equ 0x8200     ; 内核入口地址
 
 MSG_LONG_MODE db "Jumped to 64-bit long mode", 0
 

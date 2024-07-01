@@ -1,4 +1,8 @@
-*.c
-
+kernel
+!kernel/
+kernel.elf
 *.bin
 *.o
+dist/
+*.txt
+.gdb_history
