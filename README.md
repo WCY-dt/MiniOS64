@@ -937,8 +937,121 @@ fi
 
 但是，从 32 位切换至 64 位相较于从 16 位切换到 32 位有很大不同。最先需要考虑的就是，部分 CPU 不支持 64 位长模式，在切换前需要检查支持情况。只有支持 64 位的 CPU 才能进入 64 位长模式。
 
-检查支持情况可以直接通过 `CPUID` 指令的扩展功能来实现。但是，这包含了 3 个隐含操作：
+检查支持情况可以直接通过 [`CPUID`](https://www.scss.tcd.ie/jeremy.jones/CS4021/processor-identification-cpuid-instruction-note.pdf) 来实现。`CPUID` 是 x86 架构下的用于查询 CPU 具体信息的指令，可以获取到 CPU 的制造商、型号、指令集、功能特性等。对于完全支持 `CPUID` 的 CPU，这个指令可以接收这些参数值：
+
+- 基础功能：
+  - `0`：获取厂商标识符；
+  - `1`：获取CPU型号、系列号、步进和特性信息；
+  - `2`：获取高级处理器缓存描述符；
+  - `3`：获取处理器序列号；
+  - `4`：获取确定处理器类型的确定位；
+- 扩展功能：
+  - `0x80000000`：获取最大扩展参数值和厂商标识符；
+  - `0x80000001`：获取扩展处理器信息和特性位；
+  - `0x80000002`-`0x80000004`：获取处理器品牌字符串。
+
+表明 CPU 是否支持 64 位长模式的标志位就可以用参数 `0x80000001` 获取得到。然而，有一些 CPU 并不支持扩展功能；更有些 CPU 直接不支持 `CPUID` 指令！
+
+于是，我们为了检查 CPU 对 64 位长模式的支持情况，需要逐项检查：
 
 1. 检查 CPU 是否支持 `CPUID` 指令；
+
+  标志位寄存器的第 21 位表明了 CPU 是否支持 `CPUID` 指令。如果支持，则其*必须*为 `1`，否则可以为任意值。我们可以修改这一位，然后观察它是否会被自动该回去。如果被改回去了，就说明 CPU 支持 `CPUID` 指令。
+
 2. 检查 `CPUID` 指令是否支持扩展功能；
+
+  `CPUID` 指令的最大参数值可以通过参数 `0x80000000` 获取。如果支持扩展功能，那么最大参数值应该大于等于 `0x80000001`。
+
 3. 使用 `CPUID` 指令的扩展功能检查是否支持 64 位长模式。
+
+  如果支持 64 位长模式，那么 `CPUID` 指令的参数 `0x80000001` 的第 29 位应该为 `1`。
+
+我们依据以上步骤，可以写出检查 CPU 是否支持 64 位长模式的代码：
+
+[`boot/protected_mode/check_elevate.asm`](./boot/protected_mode/check_elevate.asm)：
+
+```asm
+[bits 32]
+
+; @depends print.asm
+; @depends print_clear.asm
+check_elevate_32:
+  pusha ; 保存寄存器状态
+
+; 将标志位第 21 位翻转，观察是否会自动恢复，如果恢复了，说明 cpuid 存在
+.check_cpuid_exist_32:
+  pushfd            ; 保存标志寄存器
+  pop eax           ; 将标志寄存器保存到 eax
+  mov ecx, eax      ; 复制标志寄存器到 ecx
+
+  xor eax, 0x200000 ; 将第 21 位翻转
+  push eax          ; 将修改后的标志寄存器保存到栈中
+  popfd             ; 恢复标志寄存器
+
+  pushfd            ; 保存修改后的标志寄存器
+  pop eax           ; 将修改后的标志寄存器保存到 eax
+
+  push ecx          ; 将原始标志寄存器保存到栈中
+  popfd             ; 恢复标志寄存器
+
+  cmp eax, ecx      ; 比较修改后的标志寄存器和原始标志寄存器
+  je .no_cpuid_32   ; 如果相等，说明不支持 64 位
+
+; 将 0x80000000 作为参数调用 cpuid，如果 eax 变大了，说明支持扩展功能
+.check_cpuid_extend_function_exist_32:
+  mov eax, 0x80000000 ; 设置 cpuid 的最大功能号
+  cpuid               ; 调用 cpuid
+
+  cmp eax, 0x80000000 ; 检查是否支持扩展功能
+  jle .no_cpuid_extend_function_32
+
+;
+.check_cpuid_lm_32:
+  mov eax, 0x80000001  ; 设置 cpuid 的功能号
+  cpuid                ; 调用 cpuid
+
+  test edx, 0x20000000 ; 检查第 29 位是否为 1
+  jz .no_lm_32
+
+  popa                 ; 恢复寄存器状态
+  ret
+
+.no_cpuid_32:
+  call print_clear_32
+  mov esi, NO_CPUID_MSG_32
+  call print_32
+  jmp $
+
+.no_cpuid_extend_function_32:
+  call print_clear_32
+  mov esi, NO_EXTEND_MSG_32
+  call print_32
+  jmp $
+
+.no_lm_32:
+  call print_clear_32
+  mov esi, NO_LM_MSG_32
+  call print_32
+  jmp $
+
+NO_CPUID_MSG_32  db "[ERR] CPUID not supported",   0
+NO_EXTEND_MSG_32 db "[ERR] Extended functions not supported", 0
+NO_LM_MSG_32     db "[ERR] Long mode not supported",           0
+```
+
+### 页表
+
+页表是一种数据结构，用于将虚拟地址映射到物理地址。你可以把页表理解为之前用过的段寄存器的升级版。它可以更加高效地管理内存，提高内存的利用率，同时支持虚拟内存、内存保护等功能。但在这里，bootloader 的职责只是建立起一个最基本的页表，以便能够加载和运行内核。在内核加载完后，就会将页表移交给内核了。
+
+页表由 4 层组成：
+
+- `PML4`（Page Map Level 4）：最顶层的页表，用于将虚拟地址映射到 `PDPT`；
+- `PDPT`（Page Directory Pointer Table）：第二层的页表，用于将虚拟地址映射到 `PD`；
+- `PD`（Page Directory）：第三层的页表，用于将虚拟地址映射到 `PT`；
+- `PT`（Page Table）：最底层的页表，用于将虚拟地址映射到物理地址。
+
+每层页表都有 512 个项，每个项占用 8 字节。由于 `PT` 的每个项可以映射 4KB 的内存，因此，理论上整个页表可以映射 512 \* 512 \* 512 \* 4KB = 256TB 的内存。
+
+初始化页表前，我们需要清理页表所需的内存，以防发生错误。
+
+初始化页表之后，还需要设置 PAE 标志位。PAE（Physical Address Extension）是一种扩展的物理地址，可以将物理地址扩展到 36 位，从而支持 64 位长模式。

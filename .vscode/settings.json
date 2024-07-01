@@ -9,5 +9,6 @@
     "MD024": false, // no-duplicate-heading: Multiple headings with the same content
     "MD026": false, // no-trailing-punctuation: Trailing punctuation in heading
     "MD028": false, // no-blanks-blockquote: Blank line inside blockquote
+    "MD029": false, // ol-prefix: Ordered list item prefix
   }
 }
