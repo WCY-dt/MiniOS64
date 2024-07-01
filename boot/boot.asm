@@ -64,7 +64,7 @@ BEGIN_PM_32:
 %include "protected_mode/gdt.asm"
 %include "protected_mode/elevate.asm"
 
-VGA_BASE_32       equ 0xb8000     ; VGA 显示内存地址
+VGA_BASE_32       equ 0x000b8000  ; VGA 显示内存地址
 VGA_LIMIT_32      equ 80 * 25 * 2 ; VGA 显示内存地址限制
 WHITE_ON_BLACK_32 equ 0x0f        ; 白色文本，黑色背景
 
@@ -89,7 +89,7 @@ BEGIN_LM_64:
 %include "long_mode/print.asm"
 %include "long_mode/print_clear.asm"
 
-VGA_BASE_64       equ 0xb8000     ; VGA 显示内存地址
+VGA_BASE_64       equ 0x000b8000  ; VGA 显示内存地址
 VGA_LIMIT_64      equ 80 * 25 * 2 ; VGA 显示内存地址限制
 WHITE_ON_BLUE_64  equ 0x1f        ; 白色文本，蓝色背景
 

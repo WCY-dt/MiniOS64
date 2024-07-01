@@ -13,16 +13,16 @@ print_64:
   shl rdi, 8                     ; 将打印样式左移 8 位
 
 .print_loop_64:
-  cmp byte[rsi], 0              ; 判断是否为字符串结尾
+  cmp byte[rsi], 0               ; 判断是否为字符串结尾
   je .print_done_64              ; 如果是，结束循环
 
   cmp rdx, VGA_BASE_64 + VGA_LIMIT_64 ; 判断是否到达显示内存地址限制
-  jge .print_done_64             ; 如果是，结束循环
+  je .print_done_64              ; 如果是，结束循环
 
   mov rax, rdi                   ; 设置样式
-  mov al, byte[rsi]                  ; 取出 rsi 指向的数据
+  mov al, byte[rsi]              ; 取出 rsi 指向的数据
 
-  mov word[rdx], ax                  ; 将 ax 中的数据写入显存
+  mov word[rdx], ax              ; 将 ax 中的数据写入显存
   
   add rsi, 1                     ; 指向下一个字符
   add rdx, 2                     ; 指向下一个字符的显存位置
