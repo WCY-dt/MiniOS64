@@ -946,7 +946,11 @@ fi
 
 ### 能用 64 位吗？
 
-我们已经完成了从 16 位实模式到 32 位保护模式的切换。但我们的目标是，遥遥领先。因此，我们要继续完成从 32 位保护模式到 64 位长模式的切换。
+我们已经完成了从 16 位实模式到 32 位保护模式的切换。
+
+如果你就是要编写 32 位操作系统的话，可以就此停下，对其进行完善，比如设置页表、实现中断等，然后开始写内核。
+
+但我们的目标是，遥遥领先。因此，我们要继续完成从 32 位保护模式到 64 位长模式的切换。
 
 > 我们这里只讨论 x86_64。而 IA-64 和 x86_64 差别巨大，我们暂不做讨论。
 
@@ -1075,8 +1079,360 @@ NO_LM_MSG_32     db "[ERR] Long mode not supported",           0
 - `PD`（Page Directory）：第三层的页表，用于将虚拟地址映射到 `PT`；
 - `PT`（Page Table）：最底层的页表，用于将虚拟地址映射到物理地址。
 
-每层页表都有 512 个项，每个项占用 8 字节。由于 `PT` 的每个项可以映射 4KB 的内存，因此，理论上整个页表可以映射 512 \* 512 \* 512 \* 4KB = 256TB 的内存。
+> 有些还支持更高层级的页表 `PML5`。但是，页表层数越多，寻址越慢，普通的操作系统一般不会使用。
 
-初始化页表前，我们需要清理页表所需的内存，以防发生错误。
+每层页表都有 512 个项，每个项占用 8 字节。由于 `PT` 的每个项可以映射 4KB 的内存，因此，理论上整个页表可以处理 48 位虚拟寻址、映射 512 \* 512 \* 512 \* 4KB = 256TB 的内存。
 
-初始化页表之后，还需要设置 PAE 标志位。PAE（Physical Address Extension）是一种扩展的物理地址，可以将物理地址扩展到 36 位，从而支持 64 位长模式。
+> 你也许会问，反正是 52 位的地址总线，为什么不直接寻址 53 位的物理内存呢？
+>
+> 通常来讲，页表处理的内存量不会达到最大值，因为页表还有一个更重要的作用：内存保护。通过页表，我们可以将一部分内存设置为只读、只执行、不可访问等，从而保护内存不被恶意程序破坏。页表最大的意义也在于此。
+
+页表每项的结构如下：
+
+![页表项结构](./imgs/pt.png)
+
+初始化页表的步骤如下：
+
+1. 初始化页表前，我们需要在 `cr3` 寄存器中记录页表起始位置，并清理页表所需的内存以防发生错误。
+2. 初始化页表时，对于较高级的 `PML4`、`PDPT`、`PD`，我们只需要给它建立唯一的一个表项即可。这个表项的内容是指向下一级页表的地址，标志位只有最后两位为 `1`——也就是存在位和可写位。对于其它标志位，我们可以设置为 `0`。
+3. 对于 `PT` 就不能这样做了，因为我们需要访问到所有内存，因此需要它建立尽可能多的表项。这样，对于每个物理地址，我们才都能映射到。
+4. 初始化页表之后，还需要设置 PAE 标志位。PAE（Physical Address Extension）是一种扩展的物理地址，可以将物理地址扩展到 36 位，从而支持 64 位长模式。我们只需要将 `cr4` 寄存器的第 5 位置 `1` 即可。
+
+接下来，我们可以写出初始化页表的代码：
+
+[`boot/protected_mode/init_pt.asm`](./boot/protected_mode/init_pt.asm)：
+
+```asm
+[bits 32]
+
+init_pt_32:
+  pusha
+
+; 在 cr3 寄存器中设置页表位置并清理需要的内存
+.clear_pt_memory_32:
+  mov edi, 0x1000 ; 页表从 0x1000 开始
+  mov cr3, edi    ; 设置 PML4T 的基地址
+  xor eax, eax    ; 清零 eax
+  mov ecx, 4096   ; 页表大小 4096 字节
+  rep stosd       ; 清零整个页表
+  mov edi, cr3    ; 将 edi 设置为 PML4T 的地址
+
+; 设置各级页表入口
+.set_pt_entry_32:
+  mov dword[edi], 0x2003 ; 向 PML4T 写入第一个 PDPT 的地址及 flag
+  add edi, 0x1000        ; 将 edi 设置为第一个 PDPT 的地址
+  mov dword[edi], 0x3003 ; 向 PDPT 写入第一个 PD 的地址及 flag
+  add edi, 0x1000        ; 将 edi 设置为第一个 PD 的地址
+  mov dword[edi], 0x4003 ; 向 PD 写入第一个 PT 的地址及 flag
+  add edi, 0x1000        ; 将 edi 设置为第一个 PT 的地址
+
+; 设置页表属性
+.set_pt_attr_32:
+  mov ebx, 0x00000003       ; 默认地址 0x0000，flag 0x0003
+  mov ecx, 512              ; 下面进行 512 次循环，设置 512 个页表项
+
+.set_pt_attr_loop_32:
+  mov dword[edi], ebx       ; 写入第一个 PT 指向的第一个物理地址
+  add ebx, 0x1000           ; 下一个 PT 指向的第一个物理地址
+  add edi, 8                ; 下一个写入的位置
+  loop .set_pt_attr_loop_32 ; 循环
+
+; 启用 PAE
+.enable_pae_32:
+  mov eax, cr4 ; 读取 cr4
+  or eax, 0x20 ; 设置 PAE 位
+  mov cr4, eax ; 写入 cr4
+
+  popa
+  ret
+```
+
+### Another GDT
+
+尽管我们之前讲过，在 64 位长模式下不再使用分段，但是，我们还是需要设置 GDT。这是因为，GDT 里面还有一些和位数有关的标志位，我们需要调整它们。
+
+在 64 位长模式下，GDT 的结构和 32 位保护模式下的一样。但是，64 位长模式下，GDT 的基址和限制都会被忽略，所有的段都会覆盖整个内存。此外，我们还需要调整一下和位数有关的标志位。代码如下：
+
+[`boot/protected_mode/gdt.asm`](./boot/protected_mode/gdt.asm)：
+
+```asm
+[bits 32]
+align 4
+
+gdt_start_64:
+  dd 0x00000000 ; 空描述符（32 bit）
+  dd 0x00000000 ; 空描述符（32 bit）
+
+; 代码段
+gdt_code_64: 
+  dw 0xffff     ; 段长 00-15（16 bit）
+  dw 0x0000     ; 段基址 00-15（16 bit）
+  db 0x00       ; 段基址16-23（8 bit）
+  db 0b10011010 ; flags（8 bit）
+  db 0b10101111 ; flags（4 bit）+ 段长 16-19（4 bit）
+  db 0x00       ; 段基址 24-31（8 bit）
+
+; 数据段
+gdt_data_64:
+  dw 0x0000     ; 段长 00-15（16 bit）
+  dw 0x0000     ; 段基址 00-15（16 bit）
+  db 0x00       ; 段基址16-23（8 bit）
+  db 0b10010010 ; flags（8 bit）
+  db 0b10100000 ; flags（4 bit）+ 段长 16-19（4 bit）
+  db 0x00       ; 段基址 24-31（8 bit）
+
+gdt_end_64:
+
+; GDT 描述符
+gdt_descriptor_64:
+  dw gdt_end_64 - gdt_start_64 - 1 ; 比真实长度少 1（16 bit）
+  dd gdt_start_64                  ; 基址（32 bit）
+
+; 常量
+CODE_SEG_64 equ gdt_code_64 - gdt_start_64
+DATA_SEG_64 equ gdt_data_64 - gdt_start_64
+```
+
+### 切换
+
+现在，我们已经准备好从 32 位保护模式切换到 64 位长模式了。我们需要做的是：
+
+1. 将 `IA32_EFER` 的第 8 位置 `1`：
+
+  `IA32_EFER` 是一个 MSR（Model Specific Register），地址为 `0xc0000080`，用于控制 CPU 的一些特性。第 8 位是 `LME`（Long Mode Enable）位，用于控制是否启用 64 位长模式。读取和写入 MSR 需要使用 `rdmsr` 和 `wrmsr` 指令；
+
+2. 将 `CR0` 寄存器的第 31 位置 `1`：
+  
+  这个位是 `PG`（Paging）位，用于启用分页机制。在 64 位长模式下，分页是必须的；
+
+3. 加载 GDT；
+
+4. 刷掉 CPU 的管道队列，这和之前的切换一样，需要执行一个长距离的 `jmp`；
+
+5. 禁用中断；
+
+6. 更新所有段寄存器，让它们指向数据段。
+
+接下来，我们可以写出切换到 64 位长模式的代码：
+
+[`boot/protected_mode/elevate.asm`](./boot/protected_mode/elevate.asm)：
+
+```asm
+[bits 32]
+
+elevate_64:
+  mov ecx, 0xc0000080 ; 设置 IA32_EFER 的第 8 位为 1
+  rdmsr
+  or eax, 1 << 8
+  wrmsr
+
+  mov eax, cr0 ; 将 CR0 寄存器的第 31 位置 1
+  or eax, 1 << 31
+  mov cr0, eax
+
+  lgdt [gdt_descriptor_64] ; 加载 GDT
+  jmp CODE_SEG_64:.init_lm_64 ; 长距离的 jmp
+
+[bits 64]
+
+.init_lm_64:
+  cli ; 禁用中断
+
+  mov ax, DATA_SEG_64 ; 更新段寄存器
+  mov ds, ax
+  mov ss, ax
+  mov es, ax
+  mov fs, ax
+  mov gs, ax
+
+  call BEGIN_LM_64 ; 去执行接下来的代码
+```
+
+### 合体！
+
+在 64 位长模式下，我们同样去实现一下打印函数玩玩。和之前的区别在于，64 位长模式下，我们的寄存器需要使用 64 位的寄存器。此外，64 位下不再有 `pusha` 和 `popa` 指令，我们需要手动保存和恢复寄存器。代码如下：
+
+[`boot/long_mode/print.asm`](./boot/long_mode/print.asm)：
+
+```asm
+[bits 64]
+
+; @param rdi: 打印样式
+; @param rsi: 指向字符串的指针
+print_64:
+  push rdi                       ; 保存 rdi 寄存器状态
+  push rsi                       ; 保存 rsi 寄存器状态
+  push rax                       ; 保存 rax 寄存器状态
+  push rdx                       ; 保存 rdx 寄存器状态
+
+  mov rdx, VGA_BASE_64           ; 设置显存地址
+
+  shl rdi, 8                     ; 将打印样式左移 8 位
+
+.print_loop_64:
+  cmp byte[rsi], 0               ; 判断是否为字符串结尾
+  je .print_done_64              ; 如果是，结束循环
+
+  cmp rdx, VGA_BASE_64 + VGA_LIMIT_64 ; 判断是否到达显示内存地址限制
+  je .print_done_64              ; 如果是，结束循环
+
+  mov rax, rdi                   ; 设置样式
+  mov al, byte[rsi]              ; 取出 rsi 指向的数据
+
+  mov word[rdx], ax              ; 将 ax 中的数据写入显存
+  
+  add rsi, 1                     ; 指向下一个字符
+  add rdx, 2                     ; 指向下一个字符的显存位置
+
+  jmp .print_loop_64             ; 继续循环
+
+.print_done_64:
+  pop rdx                        ; 恢复 rdx 寄存器状态
+  pop rax                        ; 恢复 rax 寄存器状态
+  pop rsi                        ; 恢复 rsi 寄存器状态
+  pop rdi                        ; 恢复 rdi 寄存器状态
+  ret                            ; 返回
+```
+
+[`boot/long_mode/print_clear.asm`](./boot/long_mode/print_clear.asm)：
+
+```asm
+[bits 64]
+
+; @param rdi: 打印样式
+print_clear_64:
+  push rdi                       ; 保存 rdi 寄存器状态
+  push rax                       ; 保存 rax 寄存器状态
+  push rdx                       ; 保存 rdx 寄存器状态
+
+  shl rdi, 8 ; 将打印样式左移 8 位
+  mov rax, rdi ; 设置样式
+
+  mov al, SPACE_CHAR_64 ; 设置空格字符
+
+  mov rdi, VGA_BASE_64 ; 设置显存地址
+  mov rcx, VGA_LIMIT_64 / 2 ; 显示内存地址限制
+
+  rep stosw ; 将 ax 中的数据写入显存
+
+  pop rdx                        ; 恢复 rdx 寄存器状态
+  pop rax                        ; 恢复 rax 寄存器状态
+  pop rdi                        ; 恢复 rdi 寄存器状态
+  ret
+
+SPACE_CHAR_64 equ 0x20 ; 空格字符
+```
+
+[`boot/boot.asm`](./boot/boot.asm)：
+
+```asm
+[org 0x7c00]
+
+jmp BEGIN_RM_16
+
+KERNEL_SIZE db 0 ; 内核大小
+
+; 16 位实模式
+BEGIN_RM_16:
+[bits 16]
+
+  mov bp, 0x0500        ; 将栈指针移动到安全位置
+  mov sp, bp            ; 使其向着 256 字节的 BIOS Data Area 增长
+
+  mov [BOOT_DRIVE], dl
+
+  mov bx, 0x7e00        ; 将数据存储在 512 字节的 Loaded Boot Sector
+  mov cl, 0x02          ; 从第 2 个扇区开始
+  mov dh, [KERNEL_SIZE] ; 读取 n 个扇区
+  add dh, 2             ; 加上 2 个扇区
+  mov dl, [BOOT_DRIVE]  ; 读取的驱动器号
+  call disk_load_16     ; 读取磁盘数据
+
+  mov bx, MSG_REAL_MODE ; 打印模式信息
+  call print_16
+
+  call elevate_32       ; 进入 32 位保护模式
+
+.boot_hold_16:
+  jmp $                 ; 根本执行不到这里
+
+%include "real_mode/print.asm"
+%include "real_mode/disk.asm"
+%include "real_mode/gdt.asm"
+%include "real_mode/elevate.asm"
+
+BOOT_DRIVE    db 0
+MSG_REAL_MODE db "Started 16-bit real mode", 0
+
+times 510-($-$$) db 0 ; 填充 0
+dw 0xaa55             ; 结束标志
+
+BOOT_SECTOR_EXTENDED_32:
+; 32 位保护模式
+BEGIN_PM_32:
+[bits 32]
+
+  call print_clear_32       ; 清屏
+
+  mov esi, MSG_PROT_MODE    ; 打印模式信息
+  call print_32
+
+  call check_elevate_32     ; 检查是否支持 64 位
+
+  ; call print_clear_32
+  ; mov esi, MSG_LM_SUPPORTED ; 打印信息
+  ; call print_32
+
+  call init_pt_32            ; 初始化页表
+
+  call elevate_64            ; 进入 64 位长模式
+
+.boot_hold_32:
+  jmp $                      ; 根本执行不到这里
+
+%include "protected_mode/print.asm"
+%include "protected_mode/print_clear.asm"
+%include "protected_mode/check_elevate.asm"
+%include "protected_mode/init_pt.asm"
+%include "protected_mode/gdt.asm"
+%include "protected_mode/elevate.asm"
+
+VGA_BASE_32       equ 0x000b8000  ; VGA 显示内存地址
+VGA_LIMIT_32      equ 80 * 25 * 2 ; VGA 显示内存地址限制
+WHITE_ON_BLACK_32 equ 0x0f        ; 白色文本，黑色背景
+
+MSG_PROT_MODE    db "Loaded 32-bit protected mode", 0
+; MSG_LM_SUPPORTED db "64-bit long mode supported",   0
+
+times 512 - ($ - BOOT_SECTOR_EXTENDED_32) db 0 ; 填充 0
+
+BOOT_SECTOR_EXTENDED_64:
+; 64 位长模式
+BEGIN_LM_64:
+[bits 64]
+
+  mov rdi, WHITE_ON_BLUE_64
+  call print_clear_64
+  mov rsi, MSG_LONG_MODE
+  call print_64
+
+.boot_hold_64:
+  jmp $
+
+%include "long_mode/print.asm"
+%include "long_mode/print_clear.asm"
+
+VGA_BASE_64       equ 0x000b8000  ; VGA 显示内存地址
+VGA_LIMIT_64      equ 80 * 25 * 2 ; VGA 显示内存地址限制
+WHITE_ON_BLUE_64  equ 0x1f        ; 白色文本，蓝色背景
+
+MSG_LONG_MODE db "Jumped to 64-bit long mode", 0
+
+times 512 - ($ - BOOT_SECTOR_EXTENDED_64) db 0 ; 填充 0
+```
+
+现在编译运行，你应该可以看到：
+
+![64 位长模式结果](./imgs/finish_long.jpg)
+
+## 内核，启动！

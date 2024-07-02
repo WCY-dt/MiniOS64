@@ -1,3 +1,4 @@
+[bits 32]
 align 4
 
 gdt_start_64:
