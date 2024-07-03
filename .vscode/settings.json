@@ -1,14 +1,25 @@
 {
   "files.exclude": {
-    // "dist": true,
+    "dist": true,
     // "**/dist": true,
+    // "dist/**": true,
     ".gdb_history": true,
     "*.txt": true,
+    ".vscode": true,
+    "imgs": true,
   },
   "markdownlint.config": {
     "MD024": false, // no-duplicate-heading: Multiple headings with the same content
     "MD026": false, // no-trailing-punctuation: Trailing punctuation in heading
     "MD028": false, // no-blanks-blockquote: Blank line inside blockquote
     "MD029": false, // ol-prefix: Ordered list item prefix
-  }
+  },
+  "[makefile]": {
+    "editor.insertSpaces": false,
+    "editor.tabSize": 4
+  },
+  "[asm]": {
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2
+  },
 }
