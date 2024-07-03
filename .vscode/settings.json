@@ -1,11 +1,11 @@
 {
   "files.exclude": {
-    "dist": true,
+    // "dist": true,
     // "**/dist": true,
     // "dist/**": true,
     ".gdb_history": true,
     "*.txt": true,
-    ".vscode": true,
+    // ".vscode": true,
     "imgs": true,
   },
   "markdownlint.config": {
