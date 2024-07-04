@@ -1436,3 +1436,54 @@ times 512 - ($ - BOOT_SECTOR_EXTENDED_64) db 0 ; 填充 0
 ![64 位长模式结果](./imgs/finish_long.jpg)
 
 ## 内核，启动！
+
+### 文件组织
+
+现在，终于可以加载内核了。在开始之前，我觉得有必要先向 Linux 学习一下如何组织源码目录，否则后期代码和功能变多后再去重构就很麻烦了。
+
+写本文时，Linux stable 版本为 6.9.7，其[源码](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/?h=v6.9.7)结构如下：
+
+```plaintext
+linux
+├── arch
+├── block
+├── certs
+├── crypto
+├── Documentation
+├── drivers
+├── fs
+├── include
+├── init
+├── io_uring
+├── ipc
+├── kernel
+├── lib
+├── mm
+├── net
+├── rust
+├── samples
+├── scripts
+├── security
+├── sound
+├── tools
+├── usr
+├── virt
+└── Makefile
+```
+
+这也太复杂了，我们的内核暂时（也大概率是永远）不会有这么多功能，我们只需要保留必要的内容。我们可以参考 Linux 0.12 的[源码](https://github.com/Original-Linux/Linux-0.12)组织结构：
+
+```plaintext
+linux-0.12
+├── boot     // bootloader，我们已经写好了
+├── fs       // 文件系统
+├── include  // 头文件
+├── init     // 初始化
+├── kernel   // 内核
+├── lib      // 库
+├── mm       // 内存管理
+├── tools    // 工具
+└── Makefile // 编译文件
+```
+
+我推荐你先自己翻一翻目录，看看都有些什么内容，然后我们就可以开始编写自己的内核了。
